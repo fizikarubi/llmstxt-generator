@@ -1,0 +1,43 @@
+{
+  "name": "llmstxt-generator",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "prettier --check .",
+    "format": "prettier --write .",
+    "typecheck": "tsc --noEmit",
+    "generate": "tsx scripts/generate.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.78.0",
+    "async-retry": "^1.3.3",
+    "bottleneck": "^2.19.5",
+    "cheerio": "^1.2.0",
+    "fast-xml-builder": "^1.1.0",
+    "fast-xml-parser": "^5.5.0",
+    "next": "16.1.6",
+    "pino": "^10.3.1",
+    "react": "19.2.3",
+    "react-dom": "19.2.3",
+    "robots-parser": "^3.0.1",
+    "server-only": "^0.0.1"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/async-retry": "^1.4.9",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "llmstxt": "^0.9.0",
+    "prettier": "^3.8.1",
+    "tailwindcss": "^4",
+    "tsx": "^4.21.0",
+    "typescript": "^5",
+    "vitest": "^4.0.18"
+  }
+}
