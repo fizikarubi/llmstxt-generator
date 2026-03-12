@@ -126,9 +126,10 @@ const UrlInput = ({ onSubmit, disabled }: Props) => {
             className="w-full accent-white"
           />
           <p className="text-xs text-zinc-500">
-            How many summarization requests run in parallel. Higher values are
-            faster but use more API quota. Lower values are gentler on rate
-            limits but take more time.
+            How many pages are sent to Claude for summarization at the same
+            time. Higher values speed up generation but may hit API rate
+            limits. Lower values are slower but more reliable if you're on a
+            limited API plan.
           </p>
         </div>
       )}
