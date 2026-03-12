@@ -73,7 +73,8 @@ const UrlInput = ({ onSubmit, disabled }: Props) => {
       </div>
 
       <p className="text-xs text-zinc-500">
-        Works with server-rendered HTML sites. JavaScript-only SPAs are detected and skipped.
+        Works with server-rendered HTML sites. JavaScript-only SPAs are detected and
+        skipped.
       </p>
 
       {error && <p className="text-sm text-red-400">{error}</p>}

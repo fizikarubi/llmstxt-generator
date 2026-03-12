@@ -1,10 +1,10 @@
 import type { UseCase } from '@/server/lib/usecase';
 import type { DiscoverRequest, DiscoverResponse } from '@/shared/types';
 import { AppError } from '@/server/lib/errors';
-import { fetchRobots } from '@/server/lib/crawler/robots';
-import { discoverUrls } from '@/server/lib/crawler/discover';
-import { fetchPage } from '@/server/lib/crawler/fetcher';
-import { extractSiteInfo, isSpaShell } from '@/server/lib/crawler/extract';
+import { fetchRobots } from '@/server/lib/scraping/robots';
+import { discoverUrls } from '@/server/lib/scraping/discovery';
+import { fetchHtml } from '@/server/lib/scraping/html';
+import { extractSiteInfo, isSpaShell } from '@/server/lib/scraping/html';
 
 const parseEntryUrl = (raw: string): URL => {
   try {
@@ -41,7 +41,7 @@ export const discoverUseCase: UseCase<DiscoverRequest, DiscoverResponse> = {
       throw new AppError('robots.txt disallows crawling this site', 403);
     }
 
-    const entryPage = await fetchPage(ctx, entryUrl.href);
+    const entryPage = await fetchHtml(ctx, entryUrl.href);
     if (isSpaShell(entryPage.html)) {
       throw new AppError(
         'This page appears to be a JavaScript app — its HTML contains no server-rendered content',
@@ -51,7 +51,7 @@ export const discoverUseCase: UseCase<DiscoverRequest, DiscoverResponse> = {
     let siteHtml = entryPage.html;
     if (entryUrl.pathname !== '/') {
       try {
-        const rootPage = await fetchPage(ctx, entryUrl.origin + '/');
+        const rootPage = await fetchHtml(ctx, entryUrl.origin + '/');
         siteHtml = rootPage.html;
       } catch {
         ctx.logger.warn(

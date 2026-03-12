@@ -1,4 +1,4 @@
-import { USER_AGENT, CRAWL_TIMEOUT_MS } from './consts';
+import { USER_AGENT, FETCH_TIMEOUT_MS } from './consts';
 
 /**
  * Probe whether a `.md` version of a page exists.
@@ -30,7 +30,7 @@ export const probeMdUrl = async (url: string): Promise<string | null> => {
       const res = await fetch(candidate, {
         method: 'HEAD',
         headers: { 'User-Agent': USER_AGENT },
-        signal: AbortSignal.timeout(CRAWL_TIMEOUT_MS),
+        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
         redirect: 'follow',
       });
       if (res.ok) return candidate;

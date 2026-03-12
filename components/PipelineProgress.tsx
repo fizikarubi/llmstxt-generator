@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import type { AppState } from '@/shared/types';
 
 type LoadingState = Extract<
@@ -12,16 +12,6 @@ interface Props {
   state: LoadingState;
   onCancel: () => void;
 }
-
-const RetryingItem = ({ url }: { url: string }) => (
-  <div className="flex items-start gap-2 text-xs">
-    <span className="mt-0.5 animate-pulse text-amber-400">↻</span>
-    <div className="min-w-0 flex-1">
-      <p className="truncate text-amber-400/70">{url}</p>
-    </div>
-    <span className="shrink-0 text-amber-400/50">retrying…</span>
-  </div>
-);
 
 const FailedItem = ({ url, error }: { url: string; error: string }) => {
   const [expanded, setExpanded] = useState(false);
@@ -51,27 +41,15 @@ const PipelineProgress = ({ state, onCancel }: Props) => {
   const progress = state.status === 'summarizing' ? state.progress : null;
   const pct = progress ? Math.round((progress.completed / progress.total) * 100) : 0;
 
-  const { retrying, failed } = useMemo(() => {
-    const retrying: { url: string }[] = [];
-    const failed: { url: string; error: string }[] = [];
-    if (progress) {
-      for (const f of progress.failures) {
-        (f.retrying ? retrying : failed).push(f);
-      }
-    }
-    return { retrying, failed };
-  }, [progress]);
+  const failures = progress?.failures ?? [];
 
-  const statusParts = [
-    retrying.length > 0 ? `${retrying.length} retrying` : '',
-    failed.length > 0 ? `${failed.length} failed` : '',
-  ].filter(Boolean);
+  const failedSuffix = failures.length > 0 ? ` · ${failures.length} failed` : '';
   const label =
     state.status === 'discovering'
       ? 'Discovering pages…'
       : state.status === 'assembling'
         ? 'Assembling llms.txt…'
-        : `Summarizing pages (${progress!.completed}/${progress!.total})${statusParts.length > 0 ? ` · ${statusParts.join(', ')}` : ''}`;
+        : `Summarizing pages (${progress!.completed}/${progress!.total})${failedSuffix}`;
 
   const barWidth =
     state.status === 'discovering'
@@ -82,8 +60,7 @@ const PipelineProgress = ({ state, onCancel }: Props) => {
 
   const allItems = progress
     ? [
-        ...retrying.map((f) => ({ type: 'retrying' as const, url: f.url })),
-        ...failed.map((f) => ({
+        ...failures.map((f) => ({
           type: 'failed' as const,
           url: f.url,
           error: f.error,
@@ -121,12 +98,17 @@ const PipelineProgress = ({ state, onCancel }: Props) => {
         />
       </div>
 
+      {progress?.rateLimited && (
+        <div className="rounded-lg border border-amber-900 bg-amber-950/30 p-3 text-xs text-amber-400">
+          Rate-limited by the API — remaining batches were skipped. Assembling with the
+          pages summarized so far.
+        </div>
+      )}
+
       {allItems.length > 0 && (
         <div className="max-h-64 space-y-1 overflow-y-auto rounded-lg border border-zinc-800 bg-zinc-900 p-3">
           {allItems.map((item) =>
-            item.type === 'retrying' ? (
-              <RetryingItem key={item.url} url={item.url} />
-            ) : item.type === 'ok' ? (
+            item.type === 'ok' ? (
               <div
                 key={item.page.meta.pageUrl}
                 className="flex items-start gap-2 text-xs"

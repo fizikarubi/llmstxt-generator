@@ -43,7 +43,8 @@
       "Bash(git pull:*)",
       "Bash(git stash:*)",
       "Bash(git push:*)",
-      "Bash(git mv:*)"
+      "Bash(git mv:*)",
+      "Bash(ls -la /Users/leo/Desktop/llmstxt-generator/ | grep -E \"\\\\.md$|test|spec\")"
     ]
   }
 }

@@ -7,7 +7,7 @@ llms.txt generator — crawl any website and produce a spec-compliant [llms.txt]
 The app uses a **fan-out architecture** to avoid serverless function timeouts. Instead of one long-running function, the work is split across three short-lived endpoints orchestrated by the client:
 
 1. **Discover** — crawl the site via sitemap (preferred) or BFS fallback with 50 concurrent fetches, max depth 3. Check robots.txt, filter, deduplicate, and normalize URLs. Over-provisions by 3x to account for pages lost to filtering.
-2. **Summarize** — chunk discovered URLs into batches of 20 and fan out up to 10 concurrent requests to a serverless function. Each function invocation fetches the pages' HTML, extracts text with cheerio, and summarizes the entire batch via Claude Haiku in a single LLM call. Failed batches retry 3 times with exponential backoff + jitter.
+2. **Summarize** — chunk discovered URLs into batches of 20 and fan out up to 10 concurrent requests to a serverless function. Each function invocation fetches the pages' HTML, extracts text with cheerio, and summarizes the entire batch via Claude Haiku in a single LLM call. A 429 from any batch aborts remaining batches; the pipeline continues to assemble with whatever pages succeeded.
 3. **Assemble** — aggregate all page summaries and send them to Claude in one call. The LLM groups pages into logical H2 sections and places supplementary pages under `## Optional`. Haiku's 64k output token limit caps practical output at ~600 pages.
 
 ```
@@ -36,7 +36,7 @@ User enters URL + API key
  │ → urls[]   │    │               │    └─────────────┘
  └────────────┘    │ batch: 20     │
                    │ concurrency:10│
-                   │ retry: 3×     │
+                   │ 429 → partial │
                    │               │
                    │ → summaries[] │
                    └───────────────┘
@@ -54,7 +54,9 @@ app/
 │   ├── pipeline.ts         # Client-side pipeline (discover → summarize → assemble)
 │   ├── reducer.ts              # State machine reducer + action types
 │   └── __tests__/
-│       └── pipeline.test.ts
+│       ├── pipeline.test.ts
+│       ├── reducer.test.ts
+│       └── api.test.ts
 ├── api/
 │   ├── discover/route.ts       # Endpoint 1: URL discovery
 │   ├── summarize-batch/route.ts # Endpoint 2: batch summarize
@@ -129,18 +131,18 @@ idle ──► discovering ──► summarizing ──► assembling ──► 
 any loading state ──► idle  (via cancel / AbortController)
 ```
 
-| State         | UI                                                        |
-| ------------- | --------------------------------------------------------- |
-| `idle`        | URL input form + API key field                            |
-| `discovering` | Spinner, progress bar at 5%                               |
-| `summarizing` | Progress bar (completed/total), scrolling list of results |
-| `assembling`  | Pulsing progress bar at 100%                              |
-| `complete`    | Editable textarea, copy/download buttons, stats           |
-| `error`       | Error message with "Try again" link                       |
+| State         | UI                                                                                        |
+| ------------- | ----------------------------------------------------------------------------------------- |
+| `idle`        | URL input form + API key field                                                            |
+| `discovering` | Spinner, progress bar at 5%                                                               |
+| `summarizing` | Progress bar (completed/total), scrolling list of results; amber rate-limit banner on 429 |
+| `assembling`  | Pulsing progress bar at 100%                                                              |
+| `complete`    | Editable textarea, copy/download buttons, stats; rate-limit notice if pages were skipped  |
+| `error`       | Error message with "Try again" link                                                       |
 
 ## Concurrency and timeouts
 
-**Client-side fan-out:** Step 2 batches URLs into groups of 20 (`SUMMARIZE_BATCH_SIZE`) and fans out via a concurrency limiter (`concurrency=10`, `minTime=200ms`) in `app/_state/pipeline.ts`. Per-batch retry with `async-retry` (3 attempts, exponential backoff 200ms→5s with jitter).
+**Client-side fan-out:** Step 2 batches URLs into groups of 20 (`SUMMARIZE_BATCH_SIZE`) and fans out via a concurrency limiter (`concurrency=10`, `minTime=200ms`) in `app/_state/pipeline.ts`. Each batch is a single attempt (no retries). A 429 from any batch aborts remaining queued batches via a shared AbortController; already-in-flight batches complete. The pipeline continues to assemble with whatever pages succeeded and shows a rate-limit banner.
 
 **Cancellation:** An `AbortController` is created per submission. Calling cancel aborts all in-flight fetches and drops all queued jobs immediately.
 
@@ -185,4 +187,4 @@ npm run test:watch    # watch mode
 npm run typecheck     # tsc --noEmit
 ```
 
-Integration tests in `app/_state/__tests__/pipeline.test.ts` cover the full pipeline: discovery failures, summarize retries/exhaustion, assemble errors, abort handling, and happy-path completion.
+Integration tests in `app/_state/__tests__/` cover the full pipeline (`pipeline.test.ts`), reducer state transitions (`reducer.test.ts`), and API helpers (`api.test.ts`): discovery failures, summarize failures, rate-limit graceful degradation, assemble errors, abort handling, and happy-path completion.

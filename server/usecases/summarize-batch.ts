@@ -4,14 +4,14 @@ import type {
   SummarizeBatchResponse,
   PageInfo,
 } from '@/shared/types';
-import { AppError, getErrorMessage } from '@/server/lib/errors';
-import { fetchPage } from '@/server/lib/crawler/fetcher';
+import { AppError, getErrorMessage, getErrorStatus } from '@/server/lib/errors';
 import {
+  fetchHtml,
   extractText,
   extractDescription,
   isSpaShell,
-} from '@/server/lib/crawler/extract';
-import { probeMdUrl } from '@/server/lib/crawler/probe-md';
+} from '@/server/lib/scraping/html';
+import { probeMdUrl } from '@/server/lib/scraping/probe-md';
 import { createClient, summarizePageBatch } from '@/server/lib/llm';
 
 export const summarizeBatchUseCase: UseCase<
@@ -26,7 +26,7 @@ export const summarizeBatchUseCase: UseCase<
     // Fetch all pages in parallel
     const fetchResults = await Promise.allSettled(
       input.urls.map(async (url) => {
-        const [result, mdUrl] = await Promise.all([fetchPage(ctx, url), probeMdUrl(url)]);
+        const [result, mdUrl] = await Promise.all([fetchHtml(ctx, url), probeMdUrl(url)]);
 
         if (isSpaShell(result.html)) {
           throw new AppError('Page appears to be a JavaScript app shell', 422);
@@ -64,10 +64,7 @@ export const summarizeBatchUseCase: UseCase<
     try {
       results = await summarizePageBatch(ctx, client, pages, input.site);
     } catch (err) {
-      throw new AppError(
-        `LLM: ${getErrorMessage(err)}`,
-        err instanceof AppError ? err.status : 500,
-      );
+      throw new AppError(`LLM: ${getErrorMessage(err)}`, getErrorStatus(err));
     }
 
     ctx.logger.info(

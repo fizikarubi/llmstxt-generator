@@ -264,8 +264,8 @@ describe('runCrawlPipeline', { timeout: 30_000 }, () => {
     const state = replayState(actions);
 
     expect(state.status).toBe('error');
-    expect((state as Extract<AppState, { status: 'error' }>).message).toBe(
-      'No pages could be summarized',
+    expect((state as Extract<AppState, { status: 'error' }>).message).toContain(
+      'failed to summarize',
     );
   });
 
@@ -290,20 +290,11 @@ describe('runCrawlPipeline', { timeout: 30_000 }, () => {
     expect(failedActions.length).toBe(2);
   });
 
-  it('retries batch on 500 and succeeds', async () => {
-    let callCount = 0;
-    const page1 = makePage(1);
-    const page2 = makePage(2);
-
+  it('marks all URLs as failed when batch returns 500', async () => {
     globalThis.fetch = mockFetch({
       '/api/discover': () =>
         jsonResponse({ ...DISCOVER_OK, urls: ['https://example.com/a'] }),
-      '/api/summarize-batch': () => {
-        callCount++;
-        if (callCount === 1) return jsonResponse({ error: 'Temporary error' }, 500);
-        return jsonResponse(makeBatchOk(page1, page2));
-      },
-      '/api/assemble': () => jsonResponse(ASSEMBLE_OK),
+      '/api/summarize-batch': () => jsonResponse({ error: 'Temporary error' }, 500),
     });
 
     const { actions, dispatch } = collectActions();
@@ -318,21 +309,70 @@ describe('runCrawlPipeline', { timeout: 30_000 }, () => {
     );
 
     const state = replayState(actions);
-    expect(state.status).toBe('complete');
-    expect(callCount).toBeGreaterThan(1);
-
-    // Retry-progress actions should have been dispatched
-    const failedRetrying = actions.filter(
-      (a) =>
-        a.type === 'SUMMARIZE_BATCH_FAILED' &&
-        (a as Extract<Action, { type: 'SUMMARIZE_BATCH_FAILED' }>).retrying,
+    expect(state.status).toBe('error');
+    expect((state as Extract<AppState, { status: 'error' }>).message).toContain(
+      'failed to summarize',
     );
-    expect(failedRetrying.length).toBeGreaterThan(0);
+  });
 
-    const retrySuccess = actions.filter(
-      (a) => a.type === 'SUMMARIZE_BATCH_RETRY_SUCCESS',
+  // ── 429 rate-limit handling ────────────────────────────────────────────
+
+  it('stops queue globally on 429 and dispatches RATE_LIMITED', async () => {
+    globalThis.fetch = mockFetch({
+      '/api/discover': () =>
+        jsonResponse({ ...DISCOVER_OK, urls: ['https://example.com/a'] }),
+      '/api/summarize-batch': () => jsonResponse({ error: 'Rate limited' }, 429),
+    });
+
+    const { actions, dispatch } = collectActions();
+    const abort = new AbortController();
+
+    await runPipeline(
+      'https://example.com',
+      DEFAULT_CONFIG,
+      'key',
+      abort.signal,
+      dispatch,
     );
-    expect(retrySuccess.length).toBeGreaterThan(0);
+
+    expect(actions.some((a) => a.type === 'RATE_LIMITED')).toBe(true);
+
+    const state = replayState(actions);
+    expect(state.status).toBe('error');
+    expect((state as Extract<AppState, { status: 'error' }>).message).toContain(
+      'Rate-limited',
+    );
+  });
+
+  it('clears pending batches when one batch hits 429', async () => {
+    const urls = Array.from({ length: 40 }, (_, i) => `https://example.com/p${i}`);
+    let summarizeCalls = 0;
+
+    globalThis.fetch = mockFetch({
+      '/api/discover': () => jsonResponse({ ...DISCOVER_OK, urls }),
+      '/api/summarize-batch': () => {
+        summarizeCalls++;
+        return jsonResponse({ error: 'Rate limited' }, 429);
+      },
+    });
+
+    const { actions, dispatch } = collectActions();
+    const abort = new AbortController();
+
+    await runPipeline(
+      'https://example.com',
+      DEFAULT_CONFIG,
+      'key',
+      abort.signal,
+      dispatch,
+    );
+
+    // Only the in-flight batch(es) should have called the API — pending ones
+    // should have been cleared from the queue.
+    expect(summarizeCalls).toBeLessThanOrEqual(DEFAULT_CONFIG.concurrency);
+
+    const state = replayState(actions);
+    expect(state.status).toBe('error');
   });
 
   // ── Assemble failures ──────────────────────────────────────────────────

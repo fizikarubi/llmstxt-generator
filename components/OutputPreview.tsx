@@ -57,6 +57,13 @@ const OutputPreview = ({ state, onReset }: Props) => {
         </button>
       </div>
 
+      {state.rateLimited && (
+        <div className="rounded-lg border border-amber-900 bg-amber-950/30 p-3 text-xs text-amber-400">
+          Rate-limited by the API — some pages were skipped. Try lowering concurrency and
+          re-running for complete results.
+        </div>
+      )}
+
       {showFailures && state.failures.length > 0 && (
         <div className="max-h-48 space-y-1 overflow-y-auto rounded-lg border border-red-900/50 bg-red-950/20 p-3">
           {state.failures.map((f) => (

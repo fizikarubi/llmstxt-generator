@@ -106,7 +106,6 @@ export interface CrawlStats {
 export interface PageFailure {
   url: string;
   error: string;
-  retrying?: boolean;
 }
 
 export interface SummarizeProgress {
@@ -115,6 +114,7 @@ export interface SummarizeProgress {
   completed: number;
   total: number;
   discoveryMethod: DiscoveryMethod;
+  rateLimited: boolean;
 }
 
 export type AppState =
@@ -127,5 +127,6 @@ export type AppState =
       llmsTxt: string;
       stats: CrawlStats;
       failures: PageFailure[];
+      rateLimited: boolean;
     }
   | { status: 'error'; message: string };

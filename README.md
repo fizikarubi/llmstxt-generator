@@ -13,7 +13,7 @@ https://github.com/user-attachments/assets/941a2839-7537-4b26-afc6-1526ff417972
 The browser orchestrates three short-lived serverless endpoints in sequence — no Redis, no queue, no workers:
 
 1. **Discover** — crawl the site via sitemap (preferred) or BFS fallback with 50 concurrent fetches, max depth 3. Filter, deduplicate, and normalize URLs.
-2. **Summarize** — chunk discovered URLs into batches of 20 and fan out concurrent requests (configurable, default 10) to a serverless function. Each batch fetches pages, extracts text, and summarizes them via Claude Haiku in a single LLM call. Failed batches retry with exponential backoff + jitter.
+2. **Summarize** — chunk discovered URLs into batches of 20 and fan out concurrent requests (configurable, default 10) to a serverless function. Each batch fetches pages, extracts text, and summarizes them via Claude Haiku in a single LLM call. A 429 from any batch stops the queue and assembles with whatever pages succeeded.
 3. **Assemble** — aggregate all page summaries and send them to Claude in one call to generate the final structured llms.txt. Haiku's 64k output token limit caps practical output at ~600 pages.
 
 ```
@@ -29,7 +29,7 @@ User enters URL
 │              ⤫ abortable at any phase                      │
 └─────┼───────────────────┼───────────────────┼──────────────┘
       │                   │                   │
-      ▼                   ▼                     ▼
+      ▼                   ▼                   ▼
 ┌───────────┐    ┌─────────────────┐    ┌────────────────┐
 │ sitemap OR│    │ extract text    │    │ Haiku groups   │
 │ BFS crawl │    │ from URL        │    │ all summaries  │
@@ -37,7 +37,7 @@ User enters URL
 │ → URLs[]  │    │ summarize       │    │                │
 └───────────┘    │                 │    │ → llms.txt     │
                  │ 10 concurrent   │    └────────────────┘
-                 │ retry + backoff │
+                 │ 429 → skip rest │
                  │                 │
                  │ → Summary[]     │
                  └─────────────────┘
@@ -45,11 +45,10 @@ User enters URL
 
 ### Key highlights
 
-- **Client-side orchestration** — the browser coordinates the entire pipeline via a `useReducer` state machine (6 states, ~12 action types), keeping the backend fully stateless
-- **Concurrency control** — rate-limited fan-out (configurable concurrency + minTime throttle) with per-batch retry via async-retry and exponential backoff with jitter
-- **Partial failure tolerance** — uses `Promise.allSettled` so a crawl succeeds even if some pages fail; only errors if zero pages return
+- **Client-side orchestration** — the browser coordinates the entire pipeline via a `useReducer` state machine (6 states, 9 action types), keeping the backend fully stateless
+- **Concurrency control** — rate-limited fan-out (configurable concurrency + minTime throttle) via p-queue; a 429 from any batch skips remaining work and assembles with partial results
+- **Partial failure tolerance** — uses `Promise.allSettled` so a crawl succeeds even if some pages fail; shows cause-aware errors (rate-limit vs generic failure) when zero pages return
 - **Abort propagation** — a single `AbortController` cancels in-flight fetches, drains the job queue, and cleanly exits retries
-- **Shared TypeScript contracts** — request/response types defined once in `shared/types.ts`, imported by both client and server, with discriminated unions ensuring exhaustive state handling
 - **Structured observability** — every request gets a UUID trace ID via Pino; `withTrace` wraps async functions with automatic START/END/ERROR logging
 
 For the full system design, state machine, endpoint contracts, and project structure, see [ARCHITECTURE.md](ARCHITECTURE.md).
@@ -98,11 +97,37 @@ vercel
 - **Framework:** Next.js 16 (App Router)
 - **Language:** TypeScript (full stack, shared types)
 - **LLM:** Claude Haiku via `@anthropic-ai/sdk`
-- **Concurrency:** rate-limited fan-out + async-retry
+- **Concurrency:** rate-limited fan-out via p-queue
 - **Crawling:** cheerio, robots-parser, fast-xml-parser
 - **Styling:** Tailwind CSS
 - **Testing:** Vitest
 - **Hosting:** Vercel (serverless)
+
+## Known limitations
+
+- **No resume** — closing the tab loses the crawl; there's no persistent state
+- **No caching** — re-crawling the same site starts from scratch every time
+- **No SPA support** — JavaScript-rendered pages are detected and skipped; only server-rendered HTML is supported
+- **Output length cap** — Haiku's 64k max output token limit caps the final llms.txt at ~600 pages
+
+## Future improvement
+
+### UX
+
+- **Selective crawling** — review discovered URLs and check/uncheck pages before summarization starts
+- **URL pattern matching** — glob or regex rules like `/docs/**` or `!/docs/archive/*` for inclusion/exclusion
+- **Discovery progress** — show live URL count during the discover phase instead of a static spinner
+- **Run history** — persist past generations to localStorage or server so users can revisit without re-crawling
+
+### Output quality
+
+- **Model selection** — choose Haiku (fast/cheap) vs Sonnet (better summaries) for summarization and/or assembly
+- **Custom instructions** — user-provided prompt additions for how pages should be summarized or sections organized
+
+### Reliability
+
+- **Smarter rate-limit recovery** — on 429, pause and retry on remaining batches instead of giving up
+- **Stateful resume** — persist crawl state to localStorage or a server-side store so users can resume after disconnect
 
 ## Documentation
 

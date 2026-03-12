@@ -9,9 +9,9 @@
  *
  *   2. **Summarize** – POST `/api/summarize-batch` for batches of URLs.
  *      URLs are chunked into groups of BATCH_SIZE and processed concurrently
- *      using Bottleneck for rate-limiting. Each batch is retried as a whole
- *      with exponential back-off; non-retryable HTTP status codes (4xx except
- *      429) bail immediately. The UI is kept in sync via dispatch actions:
+ *      using p-queue for rate-limiting. Each batch is a single attempt — no
+ *      retries. A 429 from any batch aborts the entire queue so no further
+ *      batches start. The UI is kept in sync via dispatch actions:
  *        - `SUMMARIZE_BATCH_DONE`   – page summarized successfully
  *        - `SUMMARIZE_BATCH_FAILED` – page failed (batch-level or per-page)
  *      Partial failures are tolerated — the pipeline continues as long as at
@@ -24,7 +24,7 @@
  * Abort handling:
  *   The caller passes an `AbortSignal`. On abort the pipeline:
  *   - Passes the signal to every `fetch` call (triggers `AbortError`).
- *   - Tells Bottleneck to drop all waiting jobs.
+ *   - Clears the p-queue so no new batches start.
  *   - Returns silently without dispatching an ERROR action.
  *
  * State management:
@@ -33,8 +33,7 @@
  *   it only writes via dispatch.
  */
 
-import Bottleneck from 'bottleneck';
-import retry from 'async-retry';
+import PQueue from 'p-queue';
 import type {
   PipelineConfig,
   PageSummary,
@@ -45,18 +44,10 @@ import type {
   SiteInfo,
 } from '@/shared/types';
 import type { Action } from './reducer';
-import { postApi, postApiWithRetry, isRetryableStatus } from './api';
+import { postApi, postApiWithRetry } from './api';
 
 const SUMMARIZE_BATCH_SIZE = 20;
-const SUMMARIZE_MIN_TIME_MS = 200;
-
-const RETRY_OPTS = {
-  retries: 3,
-  minTimeout: 200,
-  factor: 2,
-  maxTimeout: 5_000,
-  randomize: true,
-} as const;
+const SUMMARIZE_MIN_TIME_MS = 500;
 
 // ─── Summarize phase ────────────────────────────────────────────────────────
 
@@ -70,11 +61,13 @@ const chunk = <T>(arr: T[], size: number): T[][] => {
 };
 
 /**
- * Summarize a batch of URLs via the batch endpoint with retry.
+ * Summarize a batch of URLs via the batch endpoint (single attempt).
  *
- * On success, dispatches SUMMARIZE_BATCH_DONE per page and SUMMARIZE_BATCH_FAILED
- * for any per-page failures reported by the server. On total batch failure
- * (after retries), all URLs in the batch are marked as failed.
+ * No retries — each batch either succeeds or fails once. A 429 response
+ * aborts the shared rateLimitController so all queued batches are cancelled
+ * immediately. On success, dispatches SUMMARIZE_BATCH_DONE per page and
+ * SUMMARIZE_BATCH_FAILED for any per-page failures. On total batch failure,
+ * all URLs in the batch are marked as failed.
  */
 const summarizeBatch = async (
   urls: string[],
@@ -82,81 +75,59 @@ const summarizeBatch = async (
   site: SiteInfo,
   signal: AbortSignal,
   dispatch: (action: Action) => void,
+  rateLimitController: AbortController,
 ): Promise<{ pages: PageSummary[]; failures: PageFailure[] }> => {
   if (signal.aborted) return { pages: [], failures: [] };
 
   const pages: PageSummary[] = [];
   const failures: PageFailure[] = [];
-  let hasFailedOnce = false;
 
   try {
-    const result = await retry(
-      async (bail) => {
-        const r = await postApi<SummarizeBatchResponse>(
-          '/api/summarize-batch',
-          { urls, apiKey, site },
-          signal,
-        );
-        if (r.ok) return r.data;
-        if (!isRetryableStatus(r.status)) {
-          bail(new Error(r.error));
-          return undefined as never;
-        }
-        throw new Error(r.error);
-      },
-      {
-        ...RETRY_OPTS,
-        onRetry: (err: Error, attempt: number) => {
-          if (attempt === 1) {
-            hasFailedOnce = true;
-            for (const url of urls)
-              dispatch({
-                type: 'SUMMARIZE_BATCH_FAILED',
-                url,
-                error: err.message,
-                retrying: true,
-              });
-          } else {
-            for (const url of urls) dispatch({ type: 'SUMMARIZE_BATCH_RETRYING', url });
-          }
-        },
-      },
+    const r = await postApi<SummarizeBatchResponse>(
+      '/api/summarize-batch',
+      { urls, apiKey, site },
+      signal,
     );
 
-    if (signal.aborted) return { pages: [], failures: [] };
-
-    for (const page of result.results) {
-      if (hasFailedOnce) {
-        dispatch({ type: 'SUMMARIZE_BATCH_RETRY_SUCCESS', url: page.meta.pageUrl, page });
-      } else {
+    if (r.ok) {
+      for (const page of r.data.results) {
         dispatch({ type: 'SUMMARIZE_BATCH_DONE', page });
+        pages.push(page);
       }
-      pages.push(page);
+      for (const f of r.data.failures) {
+        dispatch({ type: 'SUMMARIZE_BATCH_FAILED', url: f.url, error: f.error });
+        failures.push({ url: f.url, error: f.error });
+      }
+      return { pages, failures };
     }
-    for (const f of result.failures) {
-      dispatch({
-        type: 'SUMMARIZE_BATCH_FAILED',
-        url: f.url,
-        error: f.error,
-        retrying: false,
-      });
-      failures.push({ url: f.url, error: f.error });
+
+    // 429 → flag rate-limit and abort all queued batches
+    if (r.status === 429) {
+      dispatch({ type: 'RATE_LIMITED' });
+      rateLimitController.abort();
+    }
+
+    // Unrecoverable billing/auth errors → stop immediately and surface to user
+    if (r.status === 400 && /credit balance/i.test(r.error)) {
+      for (const url of urls) {
+        dispatch({ type: 'SUMMARIZE_BATCH_FAILED', url, error: r.error });
+        failures.push({ url, error: r.error });
+      }
+      rateLimitController.abort();
+      return { pages, failures };
+    }
+
+    // Any error — mark all URLs as failed
+    for (const url of urls) {
+      dispatch({ type: 'SUMMARIZE_BATCH_FAILED', url, error: r.error });
+      failures.push({ url, error: r.error });
     }
   } catch (err: unknown) {
     if ((err as Error).name === 'AbortError') return { pages: [], failures: [] };
 
     const error = (err as Error).message || 'Batch request failed';
     for (const url of urls) {
-      if (hasFailedOnce) {
-        dispatch({ type: 'SUMMARIZE_BATCH_RETRY_EXHAUSTED', url });
-      } else {
-        dispatch({
-          type: 'SUMMARIZE_BATCH_FAILED',
-          url,
-          error,
-          retrying: false,
-        });
-      }
+      dispatch({ type: 'SUMMARIZE_BATCH_FAILED', url, error });
       failures.push({ url, error });
     }
   }
@@ -168,8 +139,8 @@ const summarizeBatch = async (
  * Summarize all discovered URLs in batches.
  *
  * Chunks URLs into groups of BATCH_SIZE and processes them concurrently
- * via Bottleneck. Each batch is retried as a whole on failure; there is
- * no per-page fallback.
+ * via p-queue. Each batch is a single attempt — no retries. A 429 from
+ * any batch aborts all queued batches via a shared AbortController.
  */
 const summarizeAll = async (
   urls: string[],
@@ -178,19 +149,26 @@ const summarizeAll = async (
   concurrency: number,
   signal: AbortSignal,
   dispatch: (action: Action) => void,
-): Promise<{ pages: PageSummary[]; failures: PageFailure[] }> => {
-  const limiter = new Bottleneck({
-    maxConcurrent: concurrency,
-    minTime: SUMMARIZE_MIN_TIME_MS,
+): Promise<{ pages: PageSummary[]; failures: PageFailure[]; rateLimited: boolean }> => {
+  const limiter = new PQueue({
+    concurrency,
+    intervalCap: 1,
+    interval: SUMMARIZE_MIN_TIME_MS,
   });
+  const rateLimitController = new AbortController();
 
   signal.addEventListener('abort', () => {
-    limiter.stop({ dropWaitingJobs: true });
+    limiter.clear();
   });
 
   const batches = chunk(urls, SUMMARIZE_BATCH_SIZE);
   const promises = batches.map((batch) =>
-    limiter.schedule(() => summarizeBatch(batch, apiKey, site, signal, dispatch)),
+    limiter
+      .add(
+        () => summarizeBatch(batch, apiKey, site, signal, dispatch, rateLimitController),
+        { signal: rateLimitController.signal },
+      )
+      .catch(() => ({ pages: [] as PageSummary[], failures: [] as PageFailure[] })),
   );
 
   const results = await Promise.allSettled(promises);
@@ -204,7 +182,7 @@ const summarizeAll = async (
     failures.push(...result.value.failures);
   }
 
-  return { pages, failures };
+  return { pages, failures, rateLimited: rateLimitController.signal.aborted };
 };
 
 // ─── Public pipeline ─────────────────────────────────────────────────────────
@@ -249,7 +227,7 @@ export const runPipeline = async (
       total: urls.length,
       discoveryMethod: method,
     });
-    const { pages, failures } = await summarizeAll(
+    const { pages, failures, rateLimited } = await summarizeAll(
       urls,
       apiKey,
       site,
@@ -261,7 +239,13 @@ export const runPipeline = async (
     if (signal.aborted) return;
 
     if (pages.length === 0) {
-      dispatch({ type: 'ERROR', message: 'No pages could be summarized' });
+      const billingFailure = failures.find((f) => /credit balance/i.test(f.error));
+      const message = billingFailure
+        ? 'Your Anthropic API credit balance is too low. Please add credits and try again.'
+        : rateLimited
+          ? `Rate-limited by the API \u2014 all ${failures.length} pages failed. Try lowering concurrency.`
+          : `All ${failures.length} pages failed to summarize. Check the error details and try again.`;
+      dispatch({ type: 'ERROR', message });
       return;
     }
 
@@ -277,6 +261,7 @@ export const runPipeline = async (
       llmsTxt,
       stats: { summarized: pages.length, elapsedMs: Date.now() - startMs },
       failures,
+      rateLimited,
     });
   } catch (err) {
     if ((err as Error).name === 'AbortError') return;
