@@ -52,10 +52,7 @@ const OutputPreview = ({ state, onReset }: Props) => {
           )}
           <span className="text-white">{(elapsedMs / 1000).toFixed(1)}s</span>
         </p>
-        <button
-          onClick={onReset}
-          className="text-xs text-zinc-500 hover:text-zinc-300"
-        >
+        <button onClick={onReset} className="text-xs text-zinc-500 hover:text-zinc-300">
           ← Start over
         </button>
       </div>

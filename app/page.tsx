@@ -55,9 +55,7 @@ const Home = () => {
       {isLoading && (
         <div className="mt-8 w-full max-w-2xl">
           <CrawlProgress
-            state={
-              state as Exclude<AppState, { status: 'idle' | 'complete' | 'error' }>
-            }
+            state={state as Exclude<AppState, { status: 'idle' | 'complete' | 'error' }>}
             onCancel={handleCancel}
           />
         </div>

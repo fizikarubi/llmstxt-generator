@@ -7,18 +7,13 @@
  *      (via sitemap or BFS crawl). This phase does NOT retry on failure;
  *      errors are surfaced immediately to the user.
  *
- *   2. **Summarize** – POST `/api/summarize` for every discovered URL.
- *      Pages are summarized concurrently using Bottleneck for rate-limiting
- *      (see `SUMMARIZE_CONCURRENCY` / `SUMMARIZE_MIN_TIME_MS`).
- *      Each page is retried independently with exponential back-off
- *      (`RETRY.maxAttempts`, base delay `RETRY.baseMs`, max delay `RETRY.maxMs`,
- *      factor 2, jitter enabled). Non-retryable HTTP status codes (4xx except
+ *   2. **Summarize** – POST `/api/summarize-batch` for batches of URLs.
+ *      URLs are chunked into groups of BATCH_SIZE and processed concurrently
+ *      using Bottleneck for rate-limiting. Each batch is retried as a whole
+ *      with exponential back-off; non-retryable HTTP status codes (4xx except
  *      429) bail immediately. The UI is kept in sync via dispatch actions:
- *        - `SUMMARIZE_PAGE_DONE`          – first-try success
- *        - `SUMMARIZE_PAGE_FAILED`        – first failure (may still retry)
- *        - `SUMMARIZE_PAGE_RETRYING`      – subsequent retry attempt
- *        - `SUMMARIZE_PAGE_RETRY_SUCCESS` – succeeded after prior failure
- *        - `SUMMARIZE_PAGE_RETRY_EXHAUSTED` – all retries used up
+ *        - `SUMMARIZE_PAGE_DONE`   – page summarized successfully
+ *        - `SUMMARIZE_PAGE_FAILED` – page failed (batch-level or per-page)
  *      Partial failures are tolerated — the pipeline continues as long as at
  *      least one page was summarized.
  *
@@ -45,14 +40,15 @@ import type {
   PageSummary,
   PageFailure,
   DiscoverResponse,
-  SummarizeResponse,
+  SummarizeBatchResponse,
   AssembleResponse,
   SiteInfo,
 } from '@/shared/types';
 import type { Action } from './reducer';
 
+const SUMMARIZE_BATCH_SIZE = 20;
 const SUMMARIZE_CONCURRENCY = 10;
-const SUMMARIZE_MIN_TIME_MS = 2_000;
+const SUMMARIZE_MIN_TIME_MS = 200;
 
 const RETRY_OPTS = {
   retries: 3,
@@ -65,9 +61,7 @@ const RETRY_OPTS = {
 // ─── Shared fetch helpers ────────────────────────────────────────────────────
 
 /** Discriminated union: either the parsed JSON payload or an error with status. */
-type ApiResult<T> =
-  | { ok: true; data: T }
-  | { ok: false; error: string; status: number };
+type ApiResult<T> = { ok: true; data: T } | { ok: false; error: string; status: number };
 
 /** POST JSON to an internal API route. Never throws — HTTP errors are returned as `{ ok: false }`. */
 const postApi = async <T>(
@@ -94,8 +88,7 @@ const postApi = async <T>(
   return { ok: true, data: (await res.json()) as T };
 };
 
-const isRetryableStatus = (status: number): boolean =>
-  status === 429 || status >= 500;
+const isRetryableStatus = (status: number): boolean => status === 429 || status >= 500;
 
 /** POST with automatic retry. Non-retryable status codes bail immediately; retryable ones back off. */
 const postApiWithRetry = async <T>(
@@ -116,100 +109,116 @@ const postApiWithRetry = async <T>(
 
 // ─── Summarize phase ────────────────────────────────────────────────────────
 
-type SummarizePageResult =
-  | { ok: true; page: PageSummary }
-  | { ok: false; failure: PageFailure };
+/** Split an array into chunks of `size`. */
+const chunk = <T>(arr: T[], size: number): T[][] => {
+  const chunks: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) {
+    chunks.push(arr.slice(i, i + size));
+  }
+  return chunks;
+};
 
 /**
- * Summarize a single page with retry and progress dispatching.
+ * Summarize a batch of URLs via the batch endpoint with retry.
  *
- * Returns `null` when the request was aborted (no action dispatched).
- * On success/failure, dispatches the appropriate retry-aware action so the UI
- * can show per-page retry progress (failed → retrying → recovered / exhausted).
+ * On success, dispatches SUMMARIZE_PAGE_DONE per page and SUMMARIZE_PAGE_FAILED
+ * for any per-page failures reported by the server. On total batch failure
+ * (after retries), all URLs in the batch are marked as failed.
  */
-const summarizePage = async (
-  pageUrl: string,
+const summarizeBatch = async (
+  urls: string[],
   apiKey: string,
   site: SiteInfo,
   signal: AbortSignal,
   dispatch: (action: Action) => void,
-): Promise<SummarizePageResult | null> => {
-  if (signal.aborted) return null;
+): Promise<{ pages: PageSummary[]; failures: PageFailure[] }> => {
+  if (signal.aborted) return { pages: [], failures: [] };
 
-  let lastRetryError = '';
+  const pages: PageSummary[] = [];
+  const failures: PageFailure[] = [];
   let hasFailedOnce = false;
 
   try {
-    const page = await retry(
+    const result = await retry(
       async (bail) => {
-        const result = await postApi<SummarizeResponse>(
-          '/api/summarize',
-          { url: pageUrl, apiKey, site },
+        const r = await postApi<SummarizeBatchResponse>(
+          '/api/summarize-batch',
+          { urls, apiKey, site },
           signal,
         );
-
-        if (result.ok) return result.data;
-
-        if (!isRetryableStatus(result.status)) {
-          bail(new Error(result.error));
+        if (r.ok) return r.data;
+        if (!isRetryableStatus(r.status)) {
+          bail(new Error(r.error));
           return undefined as never;
         }
-        throw new Error(result.error);
+        throw new Error(r.error);
       },
       {
         ...RETRY_OPTS,
         onRetry: (err: Error, attempt: number) => {
           if (attempt === 1) {
             hasFailedOnce = true;
-            dispatch({
-              type: 'SUMMARIZE_PAGE_FAILED',
-              url: pageUrl,
-              error: err.message,
-              retrying: true,
-            });
+            for (const url of urls)
+              dispatch({
+                type: 'SUMMARIZE_PAGE_FAILED',
+                url,
+                error: err.message,
+                retrying: true,
+              });
           } else {
-            dispatch({ type: 'SUMMARIZE_PAGE_RETRYING', url: pageUrl });
+            for (const url of urls) dispatch({ type: 'SUMMARIZE_PAGE_RETRYING', url });
           }
-          lastRetryError = err.message;
         },
       },
     );
 
-    if (signal.aborted) return null;
+    if (signal.aborted) return { pages: [], failures: [] };
 
-    if (hasFailedOnce) {
-      dispatch({ type: 'SUMMARIZE_PAGE_RETRY_SUCCESS', url: pageUrl, page });
-    } else {
-      dispatch({ type: 'SUMMARIZE_PAGE_DONE', page });
+    for (const page of result.results) {
+      if (hasFailedOnce) {
+        dispatch({ type: 'SUMMARIZE_PAGE_RETRY_SUCCESS', url: page.meta.pageUrl, page });
+      } else {
+        dispatch({ type: 'SUMMARIZE_PAGE_DONE', page });
+      }
+      pages.push(page);
     }
-    return { ok: true, page };
-  } catch (err: unknown) {
-    if ((err as Error).name === 'AbortError') return null;
-
-    const error = lastRetryError || (err as Error).message || 'Unknown error';
-
-    if (hasFailedOnce) {
-      dispatch({ type: 'SUMMARIZE_PAGE_RETRY_EXHAUSTED', url: pageUrl });
-    } else {
+    for (const f of result.failures) {
       dispatch({
         type: 'SUMMARIZE_PAGE_FAILED',
-        url: pageUrl,
-        error,
+        url: f.url,
+        error: f.error,
         retrying: false,
       });
+      failures.push({ url: f.url, error: f.error });
     }
-    return { ok: false, failure: { url: pageUrl, error } };
+  } catch (err: unknown) {
+    if ((err as Error).name === 'AbortError') return { pages: [], failures: [] };
+
+    const error = (err as Error).message || 'Batch request failed';
+    for (const url of urls) {
+      if (hasFailedOnce) {
+        dispatch({ type: 'SUMMARIZE_PAGE_RETRY_EXHAUSTED', url });
+      } else {
+        dispatch({
+          type: 'SUMMARIZE_PAGE_FAILED',
+          url,
+          error,
+          retrying: false,
+        });
+      }
+      failures.push({ url, error });
+    }
   }
+
+  return { pages, failures };
 };
 
 /**
- * Summarize all discovered URLs concurrently.
+ * Summarize all discovered URLs in batches.
  *
- * Uses Bottleneck to enforce `maxConcurrent` and `minTime` between requests,
- * preventing the server (and upstream LLM API) from being overwhelmed.
- * Each URL is processed independently via `summarizePage`; individual failures
- * do not abort the batch. Results are partitioned into successful pages and
- * failures after all promises settle.
+ * Chunks URLs into groups of BATCH_SIZE and processes them concurrently
+ * via Bottleneck. Each batch is retried as a whole on failure; there is
+ * no per-page fallback.
  */
 const summarizeAll = async (
   urls: string[],
@@ -227,8 +236,9 @@ const summarizeAll = async (
     limiter.stop({ dropWaitingJobs: true });
   });
 
-  const promises = urls.map((pageUrl) =>
-    limiter.schedule(() => summarizePage(pageUrl, apiKey, site, signal, dispatch)),
+  const batches = chunk(urls, SUMMARIZE_BATCH_SIZE);
+  const promises = batches.map((batch) =>
+    limiter.schedule(() => summarizeBatch(batch, apiKey, site, signal, dispatch)),
   );
 
   const results = await Promise.allSettled(promises);
@@ -237,9 +247,9 @@ const summarizeAll = async (
   const failures: PageFailure[] = [];
 
   for (const result of results) {
-    if (result.status !== 'fulfilled' || !result.value) continue;
-    if (result.value.ok) pages.push(result.value.page);
-    else failures.push(result.value.failure);
+    if (result.status !== 'fulfilled') continue;
+    pages.push(...result.value.pages);
+    failures.push(...result.value.failures);
   }
 
   return { pages, failures };
@@ -287,13 +297,7 @@ export const runCrawlPipeline = async (
       total: urls.length,
       discoveryMethod: method,
     });
-    const { pages, failures } = await summarizeAll(
-      urls,
-      apiKey,
-      site,
-      signal,
-      dispatch,
-    );
+    const { pages, failures } = await summarizeAll(urls, apiKey, site, signal, dispatch);
 
     if (signal.aborted) return;
 

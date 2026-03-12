@@ -2,8 +2,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type {
   AppState,
   DiscoverResponse,
-  SummarizeResponse,
+  SummarizeBatchResponse,
   AssembleResponse,
+  PageSummary,
 } from '@/shared/types';
 import type { Action } from '../reducer';
 import { reducer } from '../reducer';
@@ -11,7 +12,7 @@ import { runCrawlPipeline } from '../orchestrator';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-const makePage = (n: number): SummarizeResponse => ({
+const makePage = (n: number): PageSummary => ({
   meta: {
     pageUrl: `https://example.com/page-${n}`,
     mdUrl: null,
@@ -30,6 +31,11 @@ const DISCOVER_OK: DiscoverResponse = {
 
 const ASSEMBLE_OK: AssembleResponse = { llmsTxt: '# Example\n> Test' };
 
+const makeBatchOk = (...pages: PageSummary[]): SummarizeBatchResponse => ({
+  results: pages,
+  failures: [],
+});
+
 /**
  * Collect every dispatch call into an array so we can replay them through the
  * reducer and inspect the final state (or any intermediate state).
@@ -43,7 +49,7 @@ const collectActions = () => {
 const replayState = (actions: Action[]): AppState =>
   actions.reduce<AppState>((s, a) => reducer(s, a), { status: 'idle' });
 
-/** Build a mock fetch that routes by URL path. */
+/** Build a mock fetch that routes by URL path suffix. */
 const mockFetch = (routes: Record<string, () => Response | Promise<Response>>) =>
   vi.fn(async (input: string | URL | Request, _init?: RequestInit) => {
     const url =
@@ -53,7 +59,7 @@ const mockFetch = (routes: Record<string, () => Response | Promise<Response>>) =
           ? input.toString()
           : input.url;
     for (const [pattern, handler] of Object.entries(routes)) {
-      if (url.includes(pattern)) return handler();
+      if (url.endsWith(pattern)) return handler();
     }
     return new Response(JSON.stringify({ error: 'Not found' }), {
       status: 404,
@@ -209,15 +215,14 @@ describe('runCrawlPipeline', { timeout: 30_000 }, () => {
 
   it('reaches complete with partial failures when some pages fail to summarize', async () => {
     const page1 = makePage(1);
-    let summarizeCallCount = 0;
 
     globalThis.fetch = mockFetch({
       '/api/discover': () => jsonResponse(DISCOVER_OK),
-      '/api/summarize': () => {
-        summarizeCallCount++;
-        if (summarizeCallCount <= 1) return jsonResponse(page1);
-        return jsonResponse({ error: 'LLM rate limited' }, 400);
-      },
+      '/api/summarize-batch': () =>
+        jsonResponse({
+          results: [page1],
+          failures: [{ url: 'https://example.com/b', error: 'LLM rate limited' }],
+        }),
       '/api/assemble': () => jsonResponse(ASSEMBLE_OK),
     });
 
@@ -242,7 +247,7 @@ describe('runCrawlPipeline', { timeout: 30_000 }, () => {
   it('dispatches ERROR when all pages fail to summarize', async () => {
     globalThis.fetch = mockFetch({
       '/api/discover': () => jsonResponse(DISCOVER_OK),
-      '/api/summarize': () => jsonResponse({ error: 'Page fetch timeout' }, 400),
+      '/api/summarize-batch': () => jsonResponse({ error: 'Page fetch timeout' }, 400),
     });
 
     const { actions, dispatch } = collectActions();
@@ -263,10 +268,10 @@ describe('runCrawlPipeline', { timeout: 30_000 }, () => {
     );
   });
 
-  it('shows SUMMARIZE_PAGE_FAILED then SUMMARIZE_PAGE_RETRY_EXHAUSTED when retries are exhausted', async () => {
+  it('dispatches SUMMARIZE_PAGE_FAILED for all URLs when batch fails', async () => {
     globalThis.fetch = mockFetch({
       '/api/discover': () => jsonResponse(DISCOVER_OK),
-      '/api/summarize': () => jsonResponse({ error: 'Timeout' }, 500),
+      '/api/summarize-batch': () => jsonResponse({ error: 'Timeout' }, 400),
     });
 
     const { actions, dispatch } = collectActions();
@@ -280,31 +285,22 @@ describe('runCrawlPipeline', { timeout: 30_000 }, () => {
       dispatch,
     );
 
-    const failedActions = actions.filter(
-      (a) =>
-        a.type === 'SUMMARIZE_PAGE_FAILED' ||
-        a.type === 'SUMMARIZE_PAGE_RETRYING' ||
-        a.type === 'SUMMARIZE_PAGE_RETRY_EXHAUSTED',
-    );
-    expect(failedActions.length).toBeGreaterThan(0);
-
-    const exhaustedActions = actions.filter(
-      (a) => a.type === 'SUMMARIZE_PAGE_RETRY_EXHAUSTED',
-    );
-    expect(exhaustedActions.length).toBeGreaterThan(0);
+    const failedActions = actions.filter((a) => a.type === 'SUMMARIZE_PAGE_FAILED');
+    expect(failedActions.length).toBe(2);
   });
 
-  it('shows SUMMARIZE_PAGE_RETRY_SUCCESS when a page recovers after failure', async () => {
+  it('retries batch on 500 and succeeds', async () => {
     let callCount = 0;
-    const page = makePage(1);
+    const page1 = makePage(1);
+    const page2 = makePage(2);
 
     globalThis.fetch = mockFetch({
       '/api/discover': () =>
         jsonResponse({ ...DISCOVER_OK, urls: ['https://example.com/a'] }),
-      '/api/summarize': () => {
+      '/api/summarize-batch': () => {
         callCount++;
         if (callCount === 1) return jsonResponse({ error: 'Temporary error' }, 500);
-        return jsonResponse(page);
+        return jsonResponse(makeBatchOk(page1, page2));
       },
       '/api/assemble': () => jsonResponse(ASSEMBLE_OK),
     });
@@ -320,13 +316,20 @@ describe('runCrawlPipeline', { timeout: 30_000 }, () => {
       dispatch,
     );
 
-    const retrySuccess = actions.filter(
-      (a) => a.type === 'SUMMARIZE_PAGE_RETRY_SUCCESS',
-    );
-    expect(retrySuccess.length).toBe(1);
-
     const state = replayState(actions);
     expect(state.status).toBe('complete');
+    expect(callCount).toBeGreaterThan(1);
+
+    // Retry-progress actions should have been dispatched
+    const failedRetrying = actions.filter(
+      (a) =>
+        a.type === 'SUMMARIZE_PAGE_FAILED' &&
+        (a as Extract<Action, { type: 'SUMMARIZE_PAGE_FAILED' }>).retrying,
+    );
+    expect(failedRetrying.length).toBeGreaterThan(0);
+
+    const retrySuccess = actions.filter((a) => a.type === 'SUMMARIZE_PAGE_RETRY_SUCCESS');
+    expect(retrySuccess.length).toBeGreaterThan(0);
   });
 
   // ── Assemble failures ──────────────────────────────────────────────────
@@ -336,7 +339,7 @@ describe('runCrawlPipeline', { timeout: 30_000 }, () => {
 
     globalThis.fetch = mockFetch({
       '/api/discover': () => jsonResponse(DISCOVER_OK),
-      '/api/summarize': () => jsonResponse(page1),
+      '/api/summarize-batch': () => jsonResponse(makeBatchOk(page1)),
       '/api/assemble': () => jsonResponse({ error: 'Invalid API key' }, 401),
     });
 
@@ -363,7 +366,7 @@ describe('runCrawlPipeline', { timeout: 30_000 }, () => {
 
     globalThis.fetch = mockFetch({
       '/api/discover': () => jsonResponse(DISCOVER_OK),
-      '/api/summarize': () => jsonResponse(page1),
+      '/api/summarize-batch': () => jsonResponse(makeBatchOk(page1)),
       '/api/assemble': () => jsonResponse({ error: 'LLM unavailable' }, 500),
     });
 
@@ -420,7 +423,7 @@ describe('runCrawlPipeline', { timeout: 30_000 }, () => {
 
     globalThis.fetch = mockFetch({
       '/api/discover': () => jsonResponse(singleUrlDiscover),
-      '/api/summarize': async () => {
+      '/api/summarize-batch': async () => {
         abort.abort();
         throw new DOMException('The operation was aborted', 'AbortError');
       },
@@ -443,11 +446,12 @@ describe('runCrawlPipeline', { timeout: 30_000 }, () => {
   // ── Happy path ──────────────────────────────────────────────────────────
 
   it('completes full pipeline with all pages summarized', async () => {
-    const page = makePage(1);
+    const page1 = makePage(1);
+    const page2 = makePage(2);
 
     globalThis.fetch = mockFetch({
       '/api/discover': () => jsonResponse(DISCOVER_OK),
-      '/api/summarize': () => jsonResponse(page),
+      '/api/summarize-batch': () => jsonResponse(makeBatchOk(page1, page2)),
       '/api/assemble': () => jsonResponse(ASSEMBLE_OK),
     });
 
@@ -477,7 +481,7 @@ describe('runCrawlPipeline', { timeout: 30_000 }, () => {
 
     globalThis.fetch = mockFetch({
       '/api/discover': () => jsonResponse({ ...DISCOVER_OK, method: 'sitemap' }),
-      '/api/summarize': () => jsonResponse(page1),
+      '/api/summarize-batch': () => jsonResponse(makeBatchOk(page1)),
       '/api/assemble': () => jsonResponse(ASSEMBLE_OK),
     });
 
@@ -505,7 +509,7 @@ describe('runCrawlPipeline', { timeout: 30_000 }, () => {
 
     globalThis.fetch = mockFetch({
       '/api/discover': () => jsonResponse({ ...DISCOVER_OK, method: 'bfs' }),
-      '/api/summarize': () => jsonResponse(page1),
+      '/api/summarize-batch': () => jsonResponse(makeBatchOk(page1)),
       '/api/assemble': () => jsonResponse(ASSEMBLE_OK),
     });
 
@@ -530,9 +534,7 @@ describe('runCrawlPipeline', { timeout: 30_000 }, () => {
     const summarizingState = actions
       .reduce<AppState[]>((states, a) => {
         const prev =
-          states.length > 0
-            ? states[states.length - 1]
-            : { status: 'idle' as const };
+          states.length > 0 ? states[states.length - 1] : { status: 'idle' as const };
         states.push(reducer(prev, a));
         return states;
       }, [])

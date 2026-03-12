@@ -56,7 +56,7 @@ export const discoverUseCase: UseCase<DiscoverRequest, DiscoverResponse> = {
       } catch {
         ctx.logger.warn(
           { entryUrl: entryUrl.href },
-          'could not fetch root page for site info, using entry page',
+          'could not fetch root page for site info, falling back to homepage HTML',
         );
       }
     }
@@ -64,10 +64,7 @@ export const discoverUseCase: UseCase<DiscoverRequest, DiscoverResponse> = {
     const discovered = await discoverUrls(ctx, entryUrl, maxPages, robots.sitemaps);
 
     if (discovered.urls.length === 0) {
-      throw new AppError(
-        'No pages found — site may require JavaScript to render',
-        404,
-      );
+      throw new AppError('No pages found — site may require JavaScript to render', 404);
     }
 
     const urls = deduplicateUrls(

@@ -102,6 +102,14 @@ const UrlInput = ({ onSubmit, disabled }: Props) => {
           <p className="text-xs text-zinc-500">
             Drag to 0 for no limit. Each page uses one API call.
           </p>
+          {(maxPages === null || maxPages > 600) && (
+            <p className="text-xs text-amber-400">
+              We recommend keeping pages under 600. The final llms.txt is
+              assembled by Claude Haiku 4.5 (64k max output tokens, ~100
+              tokens per page summary). If the output exceeds this limit, the
+              result will be truncated.
+            </p>
+          )}
         </div>
       )}
     </form>

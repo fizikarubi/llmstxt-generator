@@ -1,7 +1,7 @@
 import robotsParser from 'robots-parser';
-import type { LoggerContext } from '@/server/lib/logger';
 import { USER_AGENT, CRAWL_TIMEOUT_MS } from './consts';
 import { withTrace } from '@/server/lib/logger';
+import { Context } from '../context';
 
 /** Thin wrapper so the rest of the pipeline doesn't depend on robots-parser internals. */
 interface RobotsChecker {
@@ -22,10 +22,7 @@ interface RobotsChecker {
  * - `robots.isAllowed()` returns `true | false | undefined`; we treat
  *   `undefined` (no matching rule) as allowed via the `!== false` check.
  */
-export const fetchRobots = (
-  ctx: LoggerContext,
-  entryUrl: URL,
-): Promise<RobotsChecker> =>
+export const fetchRobots = (ctx: Context, entryUrl: URL): Promise<RobotsChecker> =>
   withTrace(ctx, 'fetchRobots', { root: entryUrl.href }, async () => {
     const robotsUrl = `${entryUrl.origin}/robots.txt`;
     try {

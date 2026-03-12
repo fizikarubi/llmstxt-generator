@@ -12,8 +12,8 @@ The app uses a **fan-out architecture** to avoid serverless function timeouts. I
 │                                                                      │
 │  1. POST /api/discover     ──►  { urls: string[] }                   │
 │                                                                      │
-│  2. POST /api/summarize    ──►  { url, title, summary }   ×N        │
-│     (fan-out, concurrency=5)     each call is independent            │
+│  2. POST /api/summarize-batch ──► { results, failures }    ×N        │
+│     (fan-out, batchSize=20, concurrency=10)                          │
 │     progress bar = completed / total                                 │
 │                                                                      │
 │  3. POST /api/assemble     ──►  { llmsTxt: string }                  │
@@ -36,7 +36,7 @@ app/
 │       └── orchestrator.test.ts
 ├── api/
 │   ├── discover/route.ts       # Endpoint 1: URL discovery
-│   ├── summarize/route.ts      # Endpoint 2: per-page summarize
+│   ├── summarize-batch/route.ts # Endpoint 2: batch summarize
 │   └── assemble/route.ts       # Endpoint 3: final assembly
 
 components/
@@ -46,15 +46,11 @@ components/
 
 server/
 ├── lib/
-│   ├── llm.ts                  # Claude API wrapper (summarizePage, assembleWithLlm)
+│   ├── llm.ts                  # Claude API wrapper (summarizePageBatch, assembleWithLlm)
 │   ├── logger.ts               # Pino logger with trace ID mixin
 │   ├── errors.ts               # AppError class + helpers
 │   ├── usecase.ts              # UseCase<TInput, TOutput> interface
-│   ├── context/                # AsyncLocalStorage for request tracing
-│   │   ├── index.ts
-│   │   ├── rootContext.ts
-│   │   ├── loggerContext.ts
-│   │   └── nextContext.ts
+│   ├── context.ts              # Request context (trace ID)
 │   └── crawler/
 │       ├── index.ts            # Crawler facade (re-exports all functions)
 │       ├── discover.ts         # URL discovery (sitemap + BFS fallback)
@@ -68,8 +64,7 @@ server/
     └── assemble.ts             # AssembleUseCase
 
 shared/
-├── types.ts                    # All shared types (API contracts, UI state)
-└── utils.ts                    # Constants (timeouts, limits, concurrency, retry)
+└── types.ts                    # All shared types (API contracts, UI state)
 ```
 
 ## Three endpoints
@@ -83,14 +78,14 @@ Finds crawlable URLs for a given site.
 - **Returns:** `{ urls: string[], site: SiteInfo }`
 - **Timeout:** `maxDuration = 60` (sitemap fetch + BFS can take 30s+ for large sites)
 
-### `POST /api/summarize`
+### `POST /api/summarize-batch`
 
-Fetches a single page and generates an LLM summary.
+Fetches a batch of pages and generates LLM summaries in a single call.
 
-- **Input:** `{ url, apiKey, site: SiteInfo }`
-- **Steps:** fetch page HTML → strip nav/footer/scripts with cheerio, extract main content text → extract `PageMeta` → call Claude (sonnet) with site context + page metadata + text content → return classified summary
-- **Returns:** `PageSummary` (includes `meta: PageMeta`, title, summary, isSupplementary) or error
-- **Timeout:** ~15s (HTTP fetch + one Claude call)
+- **Input:** `{ urls: string[], apiKey, site: SiteInfo }`
+- **Steps:** fetch each page's HTML → strip nav/footer/scripts with cheerio, extract main content text → extract `PageInfo` → call Claude Haiku 4.5 once with all pages batched together → return classified summaries
+- **Returns:** `{ results: PageSummary[], failures: { url, error }[] }`
+- **Timeout:** ~15s (HTTP fetches + one batched Claude call)
 
 ### `POST /api/assemble`
 
@@ -99,7 +94,7 @@ Takes all page summaries and produces the final llms.txt.
 - **Input:** `{ pages: PageSummary[], entryUrl, site: SiteInfo, apiKey }`
 - **Steps:** call Claude with flat page list (including [SUPPLEMENTARY] flags) → generates H1, blockquote, invents H2 sections from content, places all supplementary pages under ## Optional
 - **Returns:** `{ llmsTxt: string }`
-- **Timeout:** ~10s (single Claude call)
+- **Timeout:** `maxDuration = 60` (single Claude call, but output generation for large page counts can take 30-60s)
 
 ## Client state machine
 
@@ -124,34 +119,31 @@ any loading state ──► idle  (via cancel / AbortController)
 
 ## Concurrency and timeouts
 
-**Client-side fan-out:** Step 2 fans out via Bottleneck (`concurrency=5`, `minTime=2000ms`) in `app/_state/orchestrator.ts`. Per-request retry with `async-retry` (3 attempts, exponential backoff).
+**Client-side fan-out:** Step 2 batches URLs into groups of 20 (`SUMMARIZE_BATCH_SIZE`) and fans out via Bottleneck (`concurrency=10`, `minTime=200ms`) in `app/_state/orchestrator.ts`. Per-batch retry with `async-retry` (3 attempts, exponential backoff 200ms→5s with jitter).
 
-**Cancellation:** An `AbortController` is created per submission. Calling cancel aborts all in-flight fetches immediately.
+**Cancellation:** An `AbortController` is created per submission. Calling cancel aborts all in-flight fetches and tells Bottleneck to drop queued jobs immediately.
 
-**Per-request timeouts** (in `server/lib/crawler/consts.ts`):
+**Crawl timeout** (in `server/lib/crawler/consts.ts`): all HTTP requests during discovery use a single `CRAWL_TIMEOUT_MS = 5000` timeout.
 
-| Timeout    | Value | Used by                    |
-| ---------- | ----- | -------------------------- |
-| `robots`   | 1s    | robots.txt fetch           |
-| `fetch`    | 5s    | single page fetch          |
-| `discover` | 8s    | each BFS/sitemap HTTP call |
-| `bfs`      | 30s   | total BFS crawl deadline   |
+**BFS concurrency:** 50 concurrent fetches (`BFS_CONCURRENCY`) with max depth 3.
 
 ## URL discovery (`server/lib/crawler/discover.ts`)
 
 Two strategies, tried in order:
 
-1. **Sitemap** — fetch `/sitemap.xml`, parse entries, follow sitemap index files. Entries are ranked by `<priority>` and `<lastmod>` then capped at `maxPages × 3`.
-2. **BFS** — if no sitemap is found, crawl links breadth-first from the root URL up to depth 3, with concurrency-limited fetches. Cap at `maxPages × 3`.
+1. **Sitemap** — fetch `/sitemap.xml`, parse entries, follow sitemap index files (up to 5 children). Entries are ranked by `<priority>` and `<lastmod>` then capped at `maxPages × 3`.
+2. **BFS** — if no sitemap is found, crawl links breadth-first from the root URL up to depth 3, with 50 concurrent fetches. Cap at `maxPages × 3`.
 
 The 3× over-provision accounts for pages filtered out later (robots, deduplication, shell pages).
 
 ## LLM integration (`server/lib/llm.ts`)
 
-Two functions, both using Claude Sonnet via the `@anthropic-ai/sdk`:
+Two functions, both using Claude Haiku 4.5 (`claude-haiku-4-5-20251001`) via the `@anthropic-ai/sdk`:
 
-- **`summarizePage`** — lean tagger: takes `PageMeta` + extracted text (truncated to 6k chars) + `SiteInfo`, returns `PageSummary` with title, summary, and isSupplementary.
+- **`summarizePageBatch`** — batched tagger: takes multiple `PageInfo` + extracted text (each truncated to 6k chars) + `SiteInfo` in a single LLM call. Returns a `PageSummary[]` with title, summary, and isSupplementary per page. The system prompt uses `cache_control` so it's cached across calls.
 - **`assembleWithLlm`** — receives flat list of all pages (with [SUPPLEMENTARY] flag), invents H2 section names from content, groups logically, and places supplementary pages under ## Optional. Produces the complete llms.txt markdown.
+
+**Token budget & page cap:** The assembly output budget is `pageCount × 100 + 1000` tokens, capped at the model's 64k max output. This means the practical ceiling is ~640 pages — beyond that, the output will be truncated. The UI warns users to stay under 600 pages for this reason.
 
 The user provides their own Claude API key at runtime. It is passed through to each endpoint in the request body and never stored or logged.
 

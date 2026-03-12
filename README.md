@@ -1,36 +1,107 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# llmstxt-generator
 
-## Getting Started
+A web app that generates spec-compliant [llms.txt](https://llmstxt.org) files automatically. Give it a URL, and it crawls the site, summarizes every page with Claude, and assembles a structured llms.txt output.
 
-First, run the development server:
+## Architecture
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+The app uses a **fan-out architecture** — the browser orchestrates three short-lived serverless endpoints to stay within Vercel function timeouts. No Redis, no queue, no workers.
+
+```
+                         ┌──────────────────────────────┐
+                         │     Browser (Orchestrator)   │
+                         │     useReducer state machine │
+                         └──────┬───────────┬───────────┘
+                                │           │
+                   ┌────────────┘           └────────────┐
+                   ▼                                     │
+         ┌─────────────────┐                             │
+         │  POST /discover │                             │
+         │  sitemap → BFS  │                             │
+         │  returns URLs[] │                             │
+         └────────┬────────┘                             │
+                  │                                      │
+                  ▼                                      │
+   ┌──────────────────────────────┐                      │
+   │    POST /summarize-batch     │                      │
+   │    ×N concurrent (Bottleneck)│                      │
+   │    each: fetch → Claude → {} │                      │
+   │                              │                      │
+   │  ┌────┐ ┌────┐ ┌────┐        │                      │
+   │  │ p1 │ │ p2 │ │ p3 │ ...    │  ← rate-limited      │
+   │  └────┘ └────┘ └────┘        │    with retry        │
+   └──────────────┬───────────────┘                      │
+                  │                                      │
+                  ▼                                      ▼
+         ┌──────────────────┐               ┌────────────────┐
+         │  POST /assemble  │──────────────►│   llms.txt     │
+         │  Claude groups & │               │   # Site Name  │
+         │  structures all  │               │   > Summary    │
+         │  summaries       │               │   ## Sections  │
+         └──────────────────┘               └────────────────┘
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+### Key highlights
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+- **Client-side orchestration** — the browser coordinates the entire pipeline via a `useReducer` state machine (6 states, ~12 action types), keeping the backend fully stateless
+- **Concurrency control** — Bottleneck rate-limits fan-out (configurable concurrency + minTime throttle) with per-batch retry via async-retry and exponential backoff with jitter
+- **Partial failure tolerance** — uses `Promise.allSettled` so a crawl succeeds even if some pages fail; only errors if zero pages return
+- **Abort propagation** — a single `AbortController` cancels in-flight fetches, drains the Bottleneck queue, and cleanly exits retries
+- **Shared TypeScript contracts** — request/response types defined once in `shared/types.ts`, imported by both client and server, with discriminated unions ensuring exhaustive state handling
+- **Structured observability** — every request gets a UUID trace ID via Pino; `withTrace` wraps async functions with automatic START/END/ERROR logging
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+For the full system design, state machine, endpoint contracts, and project structure, see [ARCHITECTURE.md](ARCHITECTURE.md).
 
-## Learn More
+## Getting started
 
-To learn more about Next.js, take a look at the following resources:
+### Prerequisites
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+- Node.js 18+
+- A [Claude API key](https://console.anthropic.com/)
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+### Setup
 
-## Deploy on Vercel
+```bash
+git clone https://github.com/your-username/llmstxt-generator.git
+cd llmstxt-generator
+npm install
+npm run dev
+```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+Open [http://localhost:3000](http://localhost:3000), enter a website URL and your API key, and generate.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+### Deploy
+
+Push to Vercel — no additional configuration needed:
+
+```bash
+vercel
+```
+
+## Scripts
+
+| Command | Description |
+| --- | --- |
+| `npm run dev` | Start dev server |
+| `npm run build` | Production build |
+| `npm test` | Run tests (Vitest) |
+| `npm run test:watch` | Tests in watch mode |
+| `npm run typecheck` | Type-check with `tsc --noEmit` |
+| `npm run lint` | Check formatting (Prettier) |
+| `npm run format` | Auto-format all files |
+| `npm run generate` | CLI script to generate llms.txt |
+
+## Tech stack
+
+- **Framework:** Next.js 16 (App Router)
+- **Language:** TypeScript (full stack, shared types)
+- **LLM:** Claude Haiku via `@anthropic-ai/sdk`
+- **Concurrency:** Bottleneck + async-retry
+- **Crawling:** cheerio, robots-parser, fast-xml-parser
+- **Styling:** Tailwind CSS
+- **Testing:** Vitest
+- **Hosting:** Vercel (serverless)
+
+## Documentation
+
+- [ARCHITECTURE.md](ARCHITECTURE.md) — system design, endpoints, state machine, concurrency model
+- [LLMSTXT_SPEC.md](LLMSTXT_SPEC.md) — the llms.txt specification reference

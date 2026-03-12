@@ -78,6 +78,17 @@ export interface SummarizeRequest {
 
 export type SummarizeResponse = PageSummary;
 
+export interface SummarizeBatchRequest {
+  urls: string[];
+  apiKey: string;
+  site: SiteInfo;
+}
+
+export interface SummarizeBatchResponse {
+  results: PageSummary[];
+  failures: { url: string; error: string }[];
+}
+
 export interface AssembleRequest {
   pages: PageSummary[];
   entryUrl: string;

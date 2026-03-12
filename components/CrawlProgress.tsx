@@ -88,9 +88,7 @@ const CrawlProgress = ({ state, onCancel }: Props) => {
           url: f.url,
           error: f.error,
         })),
-        ...[...progress.pages]
-          .reverse()
-          .map((page) => ({ type: 'ok' as const, page })),
+        ...[...progress.pages].reverse().map((page) => ({ type: 'ok' as const, page })),
       ]
     : [];
 
@@ -109,10 +107,7 @@ const CrawlProgress = ({ state, onCancel }: Props) => {
             </p>
           )}
         </div>
-        <button
-          onClick={onCancel}
-          className="text-xs text-zinc-500 hover:text-zinc-300"
-        >
+        <button onClick={onCancel} className="text-xs text-zinc-500 hover:text-zinc-300">
           Cancel
         </button>
       </div>

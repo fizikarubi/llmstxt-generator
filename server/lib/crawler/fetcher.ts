@@ -1,7 +1,7 @@
-import type { LoggerContext } from '@/server/lib/logger';
 import { AppError } from '@/server/lib/errors';
 import { USER_AGENT, CRAWL_TIMEOUT_MS } from './consts';
 import { withTrace } from '@/server/lib/logger';
+import { Context } from 'vm';
 
 export interface FetchResult {
   url: string;
@@ -19,7 +19,7 @@ export interface FetchResult {
  * Non-HTML responses (e.g. PDFs served without the right extension) are
  * rejected here so callers don't have to guard against them.
  */
-export const fetchPage = (ctx: LoggerContext, url: string): Promise<FetchResult> =>
+export const fetchPage = (ctx: Context, url: string): Promise<FetchResult> =>
   withTrace(ctx, 'fetchPage', { url }, async () => {
     const res = await fetch(url, {
       headers: { 'User-Agent': USER_AGENT },
