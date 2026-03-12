@@ -4,24 +4,45 @@ llms.txt generator — crawl any website and produce a spec-compliant [llms.txt]
 
 ## High-level flow
 
-The app uses a **fan-out architecture** to avoid serverless function timeouts. Instead of one long-running function, the work is split across three short-lived endpoints orchestrated by the client.
+The app uses a **fan-out architecture** to avoid serverless function timeouts. Instead of one long-running function, the work is split across three short-lived endpoints orchestrated by the client:
+
+1. **Discover** — crawl the site via sitemap (preferred) or BFS fallback with 50 concurrent fetches, max depth 3. Check robots.txt, filter, deduplicate, and normalize URLs. Over-provisions by 3x to account for pages lost to filtering.
+2. **Summarize** — chunk discovered URLs into batches of 20 and fan out up to 10 concurrent requests to a serverless function. Each function invocation fetches the pages' HTML, extracts text with cheerio, and summarizes the entire batch via Claude Haiku in a single LLM call. Failed batches retry 3 times with exponential backoff + jitter.
+3. **Assemble** — aggregate all page summaries and send them to Claude in one call. The LLM groups pages into logical H2 sections and places supplementary pages under `## Optional`. Haiku's 64k output token limit caps practical output at ~600 pages.
 
 ```
-┌──────────────────────────────────────────────────────────────────────┐
-│  Client (app/page.tsx)                                               │
-│                                                                      │
-│  1. POST /api/discover     ──►  { urls: string[] }                   │
-│                                                                      │
-│  2. POST /api/summarize-batch ──► { results, failures }    ×N        │
-│     (fan-out, batchSize=20, concurrency=10)                          │
-│     progress bar = completed / total                                 │
-│                                                                      │
-│  3. POST /api/assemble     ──►  { llmsTxt: string }                  │
-│     (single call with all page summaries)                            │
-└──────────────────────────────────────────────────────────────────────┘
+User enters URL + API key
+     │
+     ▼
+┌──────────────────────────────────────────────────────────────────┐
+│ Browser Orchestrator  (app/_state/orchestrator.ts)               │
+│ idle → discovering → summarizing → assembling → done             │
+│                                                                  │
+│ ┌──────────┐     ┌───────────────┐     ┌──────────┐              │
+│ │ Discover │────►│ Summarize ×N  │────►│ Assemble │              │
+│ └──────────┘     └───────────────┘     └──────────┘              │
+│              ⤫ abortable at any phase                            │
+└──────┼───────────────────┼───────────────────┼───────────────────┘
+       │                   │                   │
+       ▼                   ▼                   ▼
+ ┌────────────┐    ┌───────────────┐    ┌─────────────┐
+ │ /api/      │    │ /api/         │    │ /api/       │
+ │ discover   │    │ summarize     │    │ assemble    │
+ ├────────────┤    ├───────────────┤    ├─────────────┤
+ │ robots.txt │    │ extract text  │    │ all page    │
+ │ sitemap or │    │ from URL      │    │ summaries   │
+ │ BFS crawl  │    │ Haiku batch   │    │ → Haiku     │
+ │            │    │ summarize     │    │ → llms.txt  │
+ │ → urls[]   │    │               │    └─────────────┘
+ └────────────┘    │ batch: 20     │
+                   │ concurrency:10│
+                   │ retry: 3×     │
+                   │               │
+                   │ → summaries[] │
+                   └───────────────┘
 ```
 
-Each serverless function completes in under 30 seconds. No SSE or streaming is needed — the client tracks progress by counting resolved promises from step 2.
+Each serverless function completes within its timeout (discover: 60s, summarize: 15s, assemble: 60s). No SSE or streaming is needed — the client tracks progress by counting resolved promises from step 2.
 
 ## Project structure
 
@@ -119,9 +140,9 @@ any loading state ──► idle  (via cancel / AbortController)
 
 ## Concurrency and timeouts
 
-**Client-side fan-out:** Step 2 batches URLs into groups of 20 (`SUMMARIZE_BATCH_SIZE`) and fans out via Bottleneck (`concurrency=10`, `minTime=200ms`) in `app/_state/orchestrator.ts`. Per-batch retry with `async-retry` (3 attempts, exponential backoff 200ms→5s with jitter).
+**Client-side fan-out:** Step 2 batches URLs into groups of 20 (`SUMMARIZE_BATCH_SIZE`) and fans out via a concurrency limiter (`concurrency=10`, `minTime=200ms`) in `app/_state/orchestrator.ts`. Per-batch retry with `async-retry` (3 attempts, exponential backoff 200ms→5s with jitter).
 
-**Cancellation:** An `AbortController` is created per submission. Calling cancel aborts all in-flight fetches and tells Bottleneck to drop queued jobs immediately.
+**Cancellation:** An `AbortController` is created per submission. Calling cancel aborts all in-flight fetches and drops all queued jobs immediately.
 
 **Crawl timeout** (in `server/lib/crawler/consts.ts`): all HTTP requests during discovery use a single `CRAWL_TIMEOUT_MS = 5000` timeout.
 

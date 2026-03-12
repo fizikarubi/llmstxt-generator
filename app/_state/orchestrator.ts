@@ -36,7 +36,7 @@
 import Bottleneck from 'bottleneck';
 import retry from 'async-retry';
 import type {
-  CrawlConfig,
+  PipelineConfig,
   PageSummary,
   PageFailure,
   DiscoverResponse,
@@ -47,7 +47,6 @@ import type {
 import type { Action } from './reducer';
 
 const SUMMARIZE_BATCH_SIZE = 20;
-const SUMMARIZE_CONCURRENCY = 10;
 const SUMMARIZE_MIN_TIME_MS = 200;
 
 const RETRY_OPTS = {
@@ -224,11 +223,12 @@ const summarizeAll = async (
   urls: string[],
   apiKey: string,
   site: SiteInfo,
+  concurrency: number,
   signal: AbortSignal,
   dispatch: (action: Action) => void,
 ): Promise<{ pages: PageSummary[]; failures: PageFailure[] }> => {
   const limiter = new Bottleneck({
-    maxConcurrent: SUMMARIZE_CONCURRENCY,
+    maxConcurrent: concurrency,
     minTime: SUMMARIZE_MIN_TIME_MS,
   });
 
@@ -266,7 +266,7 @@ const summarizeAll = async (
  */
 export const runCrawlPipeline = async (
   url: string,
-  config: CrawlConfig,
+  config: PipelineConfig,
   apiKey: string,
   signal: AbortSignal,
   dispatch: (action: Action) => void,
@@ -297,7 +297,7 @@ export const runCrawlPipeline = async (
       total: urls.length,
       discoveryMethod: method,
     });
-    const { pages, failures } = await summarizeAll(urls, apiKey, site, signal, dispatch);
+    const { pages, failures } = await summarizeAll(urls, apiKey, site, config.concurrency, signal, dispatch);
 
     if (signal.aborted) return;
 

@@ -1,10 +1,10 @@
 'use client';
 
 import { useState } from 'react';
-import type { CrawlConfig } from '@/shared/types';
+import type { PipelineConfig } from '@/shared/types';
 
 interface Props {
-  onSubmit: (url: string, config: CrawlConfig, apiKey: string) => void;
+  onSubmit: (url: string, config: PipelineConfig, apiKey: string) => void;
   disabled: boolean;
 }
 
@@ -12,6 +12,7 @@ const UrlInput = ({ onSubmit, disabled }: Props) => {
   const [url, setUrl] = useState('');
   const [apiKey, setApiKey] = useState('');
   const [maxPages, setMaxPages] = useState<number | null>(null);
+  const [concurrency, setConcurrency] = useState(10);
   const [showSettings, setShowSettings] = useState(false);
   const [error, setError] = useState('');
 
@@ -32,7 +33,7 @@ const UrlInput = ({ onSubmit, disabled }: Props) => {
       return;
     }
 
-    onSubmit(url, { maxPages }, apiKey.trim());
+    onSubmit(url, { maxPages, concurrency }, apiKey.trim());
   };
 
   return (
@@ -110,6 +111,25 @@ const UrlInput = ({ onSubmit, disabled }: Props) => {
               result will be truncated.
             </p>
           )}
+
+          <label className="flex items-center justify-between text-sm text-zinc-300">
+            <span>Concurrency</span>
+            <span className="font-mono text-white">{concurrency}</span>
+          </label>
+          <input
+            type="range"
+            min={1}
+            max={20}
+            step={1}
+            value={concurrency}
+            onChange={(e) => setConcurrency(Number(e.target.value))}
+            className="w-full accent-white"
+          />
+          <p className="text-xs text-zinc-500">
+            How many summarization requests run in parallel. Higher values are
+            faster but use more API quota. Lower values are gentler on rate
+            limits but take more time.
+          </p>
         </div>
       )}
     </form>

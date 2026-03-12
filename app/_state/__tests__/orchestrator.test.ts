@@ -6,6 +6,7 @@ import type {
   AssembleResponse,
   PageSummary,
 } from '@/shared/types';
+import { DEFAULT_CONFIG } from '@/shared/types';
 import type { Action } from '../reducer';
 import { reducer } from '../reducer';
 import { runCrawlPipeline } from '../orchestrator';
@@ -99,7 +100,7 @@ describe('runCrawlPipeline', { timeout: 30_000 }, () => {
 
     await runCrawlPipeline(
       'https://example.com',
-      { maxPages: null },
+      DEFAULT_CONFIG,
       'key',
       abort.signal,
       dispatch,
@@ -123,7 +124,7 @@ describe('runCrawlPipeline', { timeout: 30_000 }, () => {
 
     await runCrawlPipeline(
       'https://example.com',
-      { maxPages: null },
+      DEFAULT_CONFIG,
       'key',
       abort.signal,
       dispatch,
@@ -150,7 +151,7 @@ describe('runCrawlPipeline', { timeout: 30_000 }, () => {
 
     await runCrawlPipeline(
       'https://example.com',
-      { maxPages: null },
+      DEFAULT_CONFIG,
       'key',
       abort.signal,
       dispatch,
@@ -175,7 +176,7 @@ describe('runCrawlPipeline', { timeout: 30_000 }, () => {
 
     await runCrawlPipeline(
       'https://example.com',
-      { maxPages: null },
+      DEFAULT_CONFIG,
       'key',
       abort.signal,
       dispatch,
@@ -198,7 +199,7 @@ describe('runCrawlPipeline', { timeout: 30_000 }, () => {
 
     await runCrawlPipeline(
       'https://example.com',
-      { maxPages: null },
+      DEFAULT_CONFIG,
       'key',
       abort.signal,
       dispatch,
@@ -231,7 +232,7 @@ describe('runCrawlPipeline', { timeout: 30_000 }, () => {
 
     await runCrawlPipeline(
       'https://example.com',
-      { maxPages: null },
+      DEFAULT_CONFIG,
       'key',
       abort.signal,
       dispatch,
@@ -255,7 +256,7 @@ describe('runCrawlPipeline', { timeout: 30_000 }, () => {
 
     await runCrawlPipeline(
       'https://example.com',
-      { maxPages: null },
+      DEFAULT_CONFIG,
       'key',
       abort.signal,
       dispatch,
@@ -279,7 +280,7 @@ describe('runCrawlPipeline', { timeout: 30_000 }, () => {
 
     await runCrawlPipeline(
       'https://example.com',
-      { maxPages: null },
+      DEFAULT_CONFIG,
       'key',
       abort.signal,
       dispatch,
@@ -310,7 +311,7 @@ describe('runCrawlPipeline', { timeout: 30_000 }, () => {
 
     await runCrawlPipeline(
       'https://example.com',
-      { maxPages: null },
+      DEFAULT_CONFIG,
       'key',
       abort.signal,
       dispatch,
@@ -348,7 +349,7 @@ describe('runCrawlPipeline', { timeout: 30_000 }, () => {
 
     await runCrawlPipeline(
       'https://example.com',
-      { maxPages: null },
+      DEFAULT_CONFIG,
       'key',
       abort.signal,
       dispatch,
@@ -375,7 +376,7 @@ describe('runCrawlPipeline', { timeout: 30_000 }, () => {
 
     await runCrawlPipeline(
       'https://example.com',
-      { maxPages: null },
+      DEFAULT_CONFIG,
       'key',
       abort.signal,
       dispatch,
@@ -404,7 +405,7 @@ describe('runCrawlPipeline', { timeout: 30_000 }, () => {
 
     await runCrawlPipeline(
       'https://example.com',
-      { maxPages: null },
+      DEFAULT_CONFIG,
       'key',
       abort.signal,
       dispatch,
@@ -433,7 +434,7 @@ describe('runCrawlPipeline', { timeout: 30_000 }, () => {
 
     await runCrawlPipeline(
       'https://example.com',
-      { maxPages: null },
+      DEFAULT_CONFIG,
       'key',
       abort.signal,
       dispatch,
@@ -460,7 +461,7 @@ describe('runCrawlPipeline', { timeout: 30_000 }, () => {
 
     await runCrawlPipeline(
       'https://example.com',
-      { maxPages: null },
+      DEFAULT_CONFIG,
       'key',
       abort.signal,
       dispatch,
@@ -490,7 +491,7 @@ describe('runCrawlPipeline', { timeout: 30_000 }, () => {
 
     await runCrawlPipeline(
       'https://example.com',
-      { maxPages: null },
+      DEFAULT_CONFIG,
       'key',
       abort.signal,
       dispatch,
@@ -518,7 +519,7 @@ describe('runCrawlPipeline', { timeout: 30_000 }, () => {
 
     await runCrawlPipeline(
       'https://example.com',
-      { maxPages: null },
+      DEFAULT_CONFIG,
       'key',
       abort.signal,
       dispatch,

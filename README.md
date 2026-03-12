@@ -1,6 +1,6 @@
 # llmstxt-generator
 
-A web app that generates spec-compliant [llms.txt](https://llmstxt.org) files automatically. Give it a URL, and it crawls the site, summarizes every page with Claude, and assembles a structured llms.txt output. Handles sites with 500+ pages in ~200 seconds.
+A web app that generates spec-compliant [llms.txt](https://llmstxt.org) files automatically. Give it a URL, and it crawls the site, summarizes every page with Claude, and assembles a structured llms.txt output. Handles sites with 500 pages in 200 seconds.
 
 **Live app:** [llmstxt-generator-eta.vercel.app](https://llmstxt-generator-eta.vercel.app/)
 
@@ -13,48 +13,46 @@ https://github.com/user-attachments/assets/941a2839-7537-4b26-afc6-1526ff417972
 
 
 ## Architecture
-The app uses a **fan-out architecture** — the browser orchestrates three short-lived serverless endpoints to stay within Vercel function timeouts. No Redis, no queue, no workers.
+
+The browser orchestrates three short-lived serverless endpoints in sequence — no Redis, no queue, no workers:
+
+1. **Discover** — crawl the site via sitemap (preferred) or BFS fallback with 50 concurrent fetches, max depth 3. Filter, deduplicate, and normalize URLs.
+2. **Summarize** — chunk discovered URLs into batches of 20 and fan out concurrent requests (configurable, default 10) to a serverless function. Each batch fetches pages, extracts text, and summarizes them via Claude Haiku in a single LLM call. Failed batches retry with exponential backoff + jitter.
+3. **Assemble** — aggregate all page summaries and send them to Claude in one call to generate the final structured llms.txt. Haiku's 64k output token limit caps practical output at ~600 pages.
 
 ```
-                         ┌──────────────────────────────┐
-                         │     Browser (Orchestrator)   │
-                         │     useReducer state machine │
-                         └──────┬───────────┬───────────┘
-                                │           │
-                   ┌────────────┘           └────────────┐
-                   ▼                                     │
-         ┌─────────────────┐                             │
-         │  POST /discover │                             │
-         │  sitemap → BFS  │                             │
-         │  returns URLs[] │                             │
-         └────────┬────────┘                             │
-                  │                                      │
-                  ▼                                      │
-   ┌──────────────────────────────┐                      │
-   │    POST /summarize-batch     │                      │
-   │    ×N concurrent (Bottleneck)│                      │
-   │    each: fetch → Claude → {} │                      │
-   │                              │                      │
-   │  ┌────┐ ┌────┐ ┌────┐        │                      │
-   │  │ p1 │ │ p2 │ │ p3 │ ...    │  ← rate-limited      │
-   │  └────┘ └────┘ └────┘        │    with retry        │
-   └──────────────┬───────────────┘                      │
-                  │                                      │
-                  ▼                                      ▼
-         ┌──────────────────┐               ┌────────────────┐
-         │  POST /assemble  │──────────────►│   llms.txt     │
-         │  Claude groups & │               │   # Site Name  │
-         │  structures all  │               │   > Summary    │
-         │  summaries       │               │   ## Sections  │
-         └──────────────────┘               └────────────────┘
+User enters URL
+     │
+     ▼
+┌────────────────────────────────────────────────────────────┐
+│ Browser Orchestrator (useReducer state machine)            │
+│                                                            │
+│ ┌──────────┐    ┌───────────────┐    ┌──────────┐          │
+│ │ Discover │───►│ Summarize ×N  │───►│ Assemble │          │
+│ └──────────┘    └───────────────┘    └──────────┘          │
+│              ⤫ abortable at any phase                      │
+└─────┼───────────────────┼───────────────────┼──────────────┘
+      │                   │                   │
+      ▼                   ▼                     ▼
+┌───────────┐    ┌─────────────────┐    ┌────────────────┐
+│ sitemap OR│    │ extract text    │    │ Haiku groups   │
+│ BFS crawl │    │ from URL        │    │ all summaries  │
+│           │    │ Haiku batch     │    │ (64K token max)│
+│ → URLs[]  │    │ summarize       │    │                │
+└───────────┘    │                 │    │ → llms.txt     │
+                 │ 10 concurrent   │    └────────────────┘
+                 │ retry + backoff │
+                 │                 │
+                 │ → Summary[]     │
+                 └─────────────────┘
 ```
 
 ### Key highlights
 
 - **Client-side orchestration** — the browser coordinates the entire pipeline via a `useReducer` state machine (6 states, ~12 action types), keeping the backend fully stateless
-- **Concurrency control** — Bottleneck rate-limits fan-out (configurable concurrency + minTime throttle) with per-batch retry via async-retry and exponential backoff with jitter
+- **Concurrency control** — rate-limited fan-out (configurable concurrency + minTime throttle) with per-batch retry via async-retry and exponential backoff with jitter
 - **Partial failure tolerance** — uses `Promise.allSettled` so a crawl succeeds even if some pages fail; only errors if zero pages return
-- **Abort propagation** — a single `AbortController` cancels in-flight fetches, drains the Bottleneck queue, and cleanly exits retries
+- **Abort propagation** — a single `AbortController` cancels in-flight fetches, drains the job queue, and cleanly exits retries
 - **Shared TypeScript contracts** — request/response types defined once in `shared/types.ts`, imported by both client and server, with discriminated unions ensuring exhaustive state handling
 - **Structured observability** — every request gets a UUID trace ID via Pino; `withTrace` wraps async functions with automatic START/END/ERROR logging
 
@@ -104,7 +102,7 @@ vercel
 - **Framework:** Next.js 16 (App Router)
 - **Language:** TypeScript (full stack, shared types)
 - **LLM:** Claude Haiku via `@anthropic-ai/sdk`
-- **Concurrency:** Bottleneck + async-retry
+- **Concurrency:** rate-limited fan-out + async-retry
 - **Crawling:** cheerio, robots-parser, fast-xml-parser
 - **Styling:** Tailwind CSS
 - **Testing:** Vitest

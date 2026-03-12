@@ -4,7 +4,7 @@ import { useReducer, useRef } from 'react';
 import UrlInput from '@/components/UrlInput';
 import CrawlProgress from '@/components/CrawlProgress';
 import OutputPreview from '@/components/OutputPreview';
-import type { AppState, CrawlConfig } from '@/shared/types';
+import type { AppState, PipelineConfig } from '@/shared/types';
 import { reducer } from './_state/reducer';
 import { runCrawlPipeline } from './_state/orchestrator';
 
@@ -12,7 +12,7 @@ const Home = () => {
   const [state, dispatch] = useReducer(reducer, { status: 'idle' });
   const abortRef = useRef<AbortController | null>(null);
 
-  const handleSubmit = async (url: string, config: CrawlConfig, apiKey: string) => {
+  const handleSubmit = async (url: string, config: PipelineConfig, apiKey: string) => {
     const abort = new AbortController();
     abortRef.current = abort;
     await runCrawlPipeline(url, config, apiKey, abort.signal, dispatch);

@@ -1,14 +1,18 @@
 // ─── Config ───────────────────────────────────────────────────────────────────
 
-export interface CrawlConfig {
+export interface PipelineConfig {
   /** Cap on how many sub-pages to process. `null` = unlimited (bounded only by
    *  what the discovery phase finds). Exposed in the UI so users can do quick
    *  test runs with a small number before committing to a full crawl. */
   maxPages: number | null;
+  /** How many summarization batches to run in parallel. Higher = faster but
+   *  uses more API quota; lower = gentler on rate limits but takes more time. */
+  concurrency: number;
 }
 
-export const DEFAULT_CONFIG: CrawlConfig = {
+export const DEFAULT_CONFIG: PipelineConfig = {
   maxPages: null,
+  concurrency: 10,
 };
 
 // ─── Extracted site data (from the site's homepage, once per crawl) ──────────
