@@ -2,7 +2,15 @@
 
 A web app that generates spec-compliant [llms.txt](https://llmstxt.org) files automatically. Give it a URL, and it crawls the site, summarizes every page with Claude, and assembles a structured llms.txt output. Handles sites with 500+ pages in ~200 seconds.
 
-**Live demo:** [llmstxt-generator-eta.vercel.app](https://llmstxt-generator-eta.vercel.app/)
+**Live app:** [llmstxt-generator-eta.vercel.app](https://llmstxt-generator-eta.vercel.app/)
+
+
+
+## Demo 
+
+
+https://github.com/user-attachments/assets/941a2839-7537-4b26-afc6-1526ff417972
+
 
 ## Architecture
 The app uses a **fan-out architecture** — the browser orchestrates three short-lived serverless endpoints to stay within Vercel function timeouts. No Redis, no queue, no workers.
