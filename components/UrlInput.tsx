@@ -72,6 +72,10 @@ const UrlInput = ({ onSubmit, disabled }: Props) => {
         </div>
       </div>
 
+      <p className="text-xs text-zinc-500">
+        Works with server-rendered HTML sites. JavaScript-only SPAs are detected and skipped.
+      </p>
+
       {error && <p className="text-sm text-red-400">{error}</p>}
 
       <button
@@ -105,10 +109,9 @@ const UrlInput = ({ onSubmit, disabled }: Props) => {
           </p>
           {(maxPages === null || maxPages > 600) && (
             <p className="text-xs text-amber-400">
-              We recommend keeping pages under 600. The final llms.txt is
-              assembled by Claude Haiku 4.5 (64k max output tokens, ~100
-              tokens per page summary). If the output exceeds this limit, the
-              result will be truncated.
+              We recommend keeping pages under 600. The final llms.txt is assembled by
+              Claude Haiku 4.5 (64k max output tokens, ~100 tokens per page summary). If
+              the output exceeds this limit, the result will be truncated.
             </p>
           )}
 
@@ -126,10 +129,9 @@ const UrlInput = ({ onSubmit, disabled }: Props) => {
             className="w-full accent-white"
           />
           <p className="text-xs text-zinc-500">
-            How many pages are sent to Claude for summarization at the same
-            time. Higher values speed up generation but may hit API rate
-            limits. Lower values are slower but more reliable if you're on a
-            limited API plan.
+            How many pages are sent to Claude for summarization at the same time. Higher
+            values speed up generation but may hit API rate limits. Lower values are
+            slower but more reliable if you're on a limited API plan.
           </p>
         </div>
       )}

@@ -47,7 +47,7 @@ const FailedItem = ({ url, error }: { url: string; error: string }) => {
   );
 };
 
-const CrawlProgress = ({ state, onCancel }: Props) => {
+const PipelineProgress = ({ state, onCancel }: Props) => {
   const progress = state.status === 'summarizing' ? state.progress : null;
   const pct = progress ? Math.round((progress.completed / progress.total) * 100) : 0;
 
@@ -152,4 +152,4 @@ const CrawlProgress = ({ state, onCancel }: Props) => {
   );
 };
 
-export default CrawlProgress;
+export default PipelineProgress;

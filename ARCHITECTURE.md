@@ -1,6 +1,6 @@
 # Architecture
 
-llms.txt generator — crawl any website and produce a spec-compliant [llms.txt](https://llmstxt.org) file using Claude for summarization.
+llms.txt generator — crawl any website and produce a spec-compliant [llms.txt](https://llmstxt.org) file using Claude for summarization. Works with server-rendered HTML sites; JavaScript-only SPAs are detected and skipped during both discovery and summarization.
 
 ## High-level flow
 
@@ -15,7 +15,7 @@ User enters URL + API key
      │
      ▼
 ┌──────────────────────────────────────────────────────────────────┐
-│ Browser Orchestrator  (app/_state/orchestrator.ts)               │
+│ Browser Pipeline  (app/_state/pipeline.ts)                       │
 │ idle → discovering → summarizing → assembling → done             │
 │                                                                  │
 │ ┌──────────┐     ┌───────────────┐     ┌──────────┐              │
@@ -51,10 +51,10 @@ app/
 ├── page.tsx                    # Top-level UI, useReducer state machine
 ├── layout.tsx
 ├── _state/
-│   ├── orchestrator.ts         # Client-side pipeline (discover → summarize → assemble)
+│   ├── pipeline.ts         # Client-side pipeline (discover → summarize → assemble)
 │   ├── reducer.ts              # State machine reducer + action types
 │   └── __tests__/
-│       └── orchestrator.test.ts
+│       └── pipeline.test.ts
 ├── api/
 │   ├── discover/route.ts       # Endpoint 1: URL discovery
 │   ├── summarize-batch/route.ts # Endpoint 2: batch summarize
@@ -62,7 +62,7 @@ app/
 
 components/
 ├── UrlInput.tsx                # URL + API key form, maxPages slider
-├── CrawlProgress.tsx           # Progress bar + page list
+├── PipelineProgress.tsx           # Progress bar + page list
 └── OutputPreview.tsx           # Editable output, copy/download
 
 server/
@@ -140,7 +140,7 @@ any loading state ──► idle  (via cancel / AbortController)
 
 ## Concurrency and timeouts
 
-**Client-side fan-out:** Step 2 batches URLs into groups of 20 (`SUMMARIZE_BATCH_SIZE`) and fans out via a concurrency limiter (`concurrency=10`, `minTime=200ms`) in `app/_state/orchestrator.ts`. Per-batch retry with `async-retry` (3 attempts, exponential backoff 200ms→5s with jitter).
+**Client-side fan-out:** Step 2 batches URLs into groups of 20 (`SUMMARIZE_BATCH_SIZE`) and fans out via a concurrency limiter (`concurrency=10`, `minTime=200ms`) in `app/_state/pipeline.ts`. Per-batch retry with `async-retry` (3 attempts, exponential backoff 200ms→5s with jitter).
 
 **Cancellation:** An `AbortController` is created per submission. Calling cancel aborts all in-flight fetches and drops all queued jobs immediately.
 
@@ -185,4 +185,4 @@ npm run test:watch    # watch mode
 npm run typecheck     # tsc --noEmit
 ```
 
-Integration tests in `app/_state/__tests__/orchestrator.test.ts` cover the full pipeline: discovery failures, summarize retries/exhaustion, assemble errors, abort handling, and happy-path completion.
+Integration tests in `app/_state/__tests__/pipeline.test.ts` cover the full pipeline: discovery failures, summarize retries/exhaustion, assemble errors, abort handling, and happy-path completion.

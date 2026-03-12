@@ -74,14 +74,6 @@ export interface DiscoverResponse {
   method: DiscoveryMethod;
 }
 
-export interface SummarizeRequest {
-  url: string;
-  apiKey: string;
-  site: SiteInfo;
-}
-
-export type SummarizeResponse = PageSummary;
-
 export interface SummarizeBatchRequest {
   urls: string[];
   apiKey: string;

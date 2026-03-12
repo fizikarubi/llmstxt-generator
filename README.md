@@ -1,16 +1,12 @@
 # llmstxt-generator
 
-A web app that generates spec-compliant [llms.txt](https://llmstxt.org) files automatically. Give it a URL, and it crawls the site, summarizes every page with Claude, and assembles a structured llms.txt output. Handles sites with 500 pages in 200 seconds.
+A web app that generates spec-compliant [llms.txt](https://llmstxt.org) files automatically. Give it a URL, and it crawls the site, summarizes every page with Claude, and assembles a structured llms.txt output. Handles sites with 500+ pages in ~200 seconds. Works with server-rendered HTML sites — JavaScript-only SPAs are detected and skipped.
 
 **Live app:** [llmstxt-generator-eta.vercel.app](https://llmstxt-generator-eta.vercel.app/)
 
-
-
-## Demo 
-
+## Demo
 
 https://github.com/user-attachments/assets/941a2839-7537-4b26-afc6-1526ff417972
-
 
 ## Architecture
 
@@ -25,7 +21,7 @@ User enters URL
      │
      ▼
 ┌────────────────────────────────────────────────────────────┐
-│ Browser Orchestrator (useReducer state machine)            │
+│ Browser Pipeline (useReducer state machine)                │
 │                                                            │
 │ ┌──────────┐    ┌───────────────┐    ┌──────────┐          │
 │ │ Discover │───►│ Summarize ×N  │───►│ Assemble │          │
@@ -86,16 +82,16 @@ vercel
 
 ## Scripts
 
-| Command | Description |
-| --- | --- |
-| `npm run dev` | Start dev server |
-| `npm run build` | Production build |
-| `npm test` | Run tests (Vitest) |
-| `npm run test:watch` | Tests in watch mode |
-| `npm run typecheck` | Type-check with `tsc --noEmit` |
-| `npm run lint` | Check formatting (Prettier) |
-| `npm run format` | Auto-format all files |
-| `npm run generate` | CLI script to generate llms.txt |
+| Command              | Description                     |
+| -------------------- | ------------------------------- |
+| `npm run dev`        | Start dev server                |
+| `npm run build`      | Production build                |
+| `npm test`           | Run tests (Vitest)              |
+| `npm run test:watch` | Tests in watch mode             |
+| `npm run typecheck`  | Type-check with `tsc --noEmit`  |
+| `npm run lint`       | Check formatting (Prettier)     |
+| `npm run format`     | Auto-format all files           |
+| `npm run generate`   | CLI script to generate llms.txt |
 
 ## Tech stack
 

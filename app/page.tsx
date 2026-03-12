@@ -2,11 +2,11 @@
 
 import { useReducer, useRef } from 'react';
 import UrlInput from '@/components/UrlInput';
-import CrawlProgress from '@/components/CrawlProgress';
+import PipelineProgress from '@/components/PipelineProgress';
 import OutputPreview from '@/components/OutputPreview';
 import type { AppState, PipelineConfig } from '@/shared/types';
 import { reducer } from './_state/reducer';
-import { runCrawlPipeline } from './_state/orchestrator';
+import { runPipeline } from './_state/pipeline';
 
 const Home = () => {
   const [state, dispatch] = useReducer(reducer, { status: 'idle' });
@@ -15,7 +15,7 @@ const Home = () => {
   const handleSubmit = async (url: string, config: PipelineConfig, apiKey: string) => {
     const abort = new AbortController();
     abortRef.current = abort;
-    await runCrawlPipeline(url, config, apiKey, abort.signal, dispatch);
+    await runPipeline(url, config, apiKey, abort.signal, dispatch);
   };
 
   const handleCancel = () => {
@@ -54,7 +54,7 @@ const Home = () => {
 
       {isLoading && (
         <div className="mt-8 w-full max-w-2xl">
-          <CrawlProgress
+          <PipelineProgress
             state={state as Exclude<AppState, { status: 'idle' | 'complete' | 'error' }>}
             onCancel={handleCancel}
           />

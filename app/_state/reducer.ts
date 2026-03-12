@@ -7,32 +7,43 @@ import type {
 } from '@/shared/types';
 
 export type Action =
-  | { type: 'START_DISCOVER' }
+  // Phase 1: transition to discovering state
+  | { type: 'START_DISCOVER_PHASE' }
+  // Phase 2: discovery done, begin summarizing N pages
   | {
-      type: 'START_SUMMARIZE_PAGES';
+      type: 'START_SUMMARIZE_PHASE';
       total: number;
       discoveryMethod: DiscoveryMethod;
     }
-  | { type: 'SUMMARIZE_PAGE_DONE'; page: PageSummary }
-  | { type: 'SUMMARIZE_PAGE_FAILED'; url: string; error: string; retrying: boolean }
-  | { type: 'SUMMARIZE_PAGE_RETRYING'; url: string }
-  | { type: 'SUMMARIZE_PAGE_RETRY_SUCCESS'; url: string; page: PageSummary }
-  | { type: 'SUMMARIZE_PAGE_RETRY_EXHAUSTED'; url: string }
-  | { type: 'START_ASSEMBLE' }
+  // A single batch completed — add its summary to results
+  | { type: 'SUMMARIZE_BATCH_DONE'; page: PageSummary }
+  // A batch failed — record the error, may still be retried
+  | { type: 'SUMMARIZE_BATCH_FAILED'; url: string; error: string; retrying: boolean }
+  // A failed batch is being retried — mark it as in-progress
+  | { type: 'SUMMARIZE_BATCH_RETRYING'; url: string }
+  // Retry succeeded — move page from failures to results
+  | { type: 'SUMMARIZE_BATCH_RETRY_SUCCESS'; url: string; page: PageSummary }
+  // All retries exhausted — mark failure as permanent
+  | { type: 'SUMMARIZE_BATCH_RETRY_EXHAUSTED'; url: string }
+  // Phase 3: all summaries collected, begin final assembly
+  | { type: 'START_ASSEMBLE_PHASE' }
+  // Pipeline complete — store the generated llms.txt and stats
   | {
       type: 'COMPLETE';
       llmsTxt: string;
       stats: CrawlStats;
       failures: PageFailure[];
     }
+  // Unrecoverable error at any phase
   | { type: 'ERROR'; message: string }
+  // User cancelled or wants to start over
   | { type: 'RESET' };
 
 export const reducer = (state: AppState, action: Action): AppState => {
   switch (action.type) {
-    case 'START_DISCOVER':
+    case 'START_DISCOVER_PHASE':
       return { status: 'discovering' };
-    case 'START_SUMMARIZE_PAGES':
+    case 'START_SUMMARIZE_PHASE':
       return {
         status: 'summarizing',
         progress: {
@@ -43,7 +54,7 @@ export const reducer = (state: AppState, action: Action): AppState => {
           discoveryMethod: action.discoveryMethod,
         },
       };
-    case 'SUMMARIZE_PAGE_DONE': {
+    case 'SUMMARIZE_BATCH_DONE': {
       if (state.status !== 'summarizing') return state;
       const p = state.progress;
       return {
@@ -55,7 +66,7 @@ export const reducer = (state: AppState, action: Action): AppState => {
         },
       };
     }
-    case 'SUMMARIZE_PAGE_FAILED': {
+    case 'SUMMARIZE_BATCH_FAILED': {
       if (state.status !== 'summarizing') return state;
       const p = state.progress;
       return {
@@ -70,7 +81,7 @@ export const reducer = (state: AppState, action: Action): AppState => {
         },
       };
     }
-    case 'SUMMARIZE_PAGE_RETRYING': {
+    case 'SUMMARIZE_BATCH_RETRYING': {
       if (state.status !== 'summarizing') return state;
       const p = state.progress;
       return {
@@ -83,7 +94,7 @@ export const reducer = (state: AppState, action: Action): AppState => {
         },
       };
     }
-    case 'SUMMARIZE_PAGE_RETRY_SUCCESS': {
+    case 'SUMMARIZE_BATCH_RETRY_SUCCESS': {
       if (state.status !== 'summarizing') return state;
       const p = state.progress;
       return {
@@ -95,7 +106,7 @@ export const reducer = (state: AppState, action: Action): AppState => {
         },
       };
     }
-    case 'SUMMARIZE_PAGE_RETRY_EXHAUSTED': {
+    case 'SUMMARIZE_BATCH_RETRY_EXHAUSTED': {
       if (state.status !== 'summarizing') return state;
       const p = state.progress;
       return {
@@ -108,7 +119,7 @@ export const reducer = (state: AppState, action: Action): AppState => {
         },
       };
     }
-    case 'START_ASSEMBLE':
+    case 'START_ASSEMBLE_PHASE':
       return { status: 'assembling' };
     case 'COMPLETE':
       return {

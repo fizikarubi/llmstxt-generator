@@ -1,7 +1,7 @@
 /**
- * Crawl pipeline orchestrator.
+ * llms.txt generation pipeline.
  *
- * Drives the three-phase crawl process from the client side:
+ * Drives the three-phase process from the client side:
  *
  *   1. **Discover** – POST `/api/discover` to find all page URLs for a site
  *      (via sitemap or BFS crawl). This phase does NOT retry on failure;
@@ -12,8 +12,8 @@
  *      using Bottleneck for rate-limiting. Each batch is retried as a whole
  *      with exponential back-off; non-retryable HTTP status codes (4xx except
  *      429) bail immediately. The UI is kept in sync via dispatch actions:
- *        - `SUMMARIZE_PAGE_DONE`   – page summarized successfully
- *        - `SUMMARIZE_PAGE_FAILED` – page failed (batch-level or per-page)
+ *        - `SUMMARIZE_BATCH_DONE`   – page summarized successfully
+ *        - `SUMMARIZE_BATCH_FAILED` – page failed (batch-level or per-page)
  *      Partial failures are tolerated — the pipeline continues as long as at
  *      least one page was summarized.
  *
@@ -29,7 +29,7 @@
  *
  * State management:
  *   All UI state transitions are driven by dispatching `Action` objects into
- *   the reducer (see `./reducer.ts`). The orchestrator never reads state —
+ *   the reducer (see `./reducer.ts`). The pipeline never reads state —
  *   it only writes via dispatch.
  */
 
@@ -45,6 +45,7 @@ import type {
   SiteInfo,
 } from '@/shared/types';
 import type { Action } from './reducer';
+import { postApi, postApiWithRetry, isRetryableStatus } from './api';
 
 const SUMMARIZE_BATCH_SIZE = 20;
 const SUMMARIZE_MIN_TIME_MS = 200;
@@ -56,55 +57,6 @@ const RETRY_OPTS = {
   maxTimeout: 5_000,
   randomize: true,
 } as const;
-
-// ─── Shared fetch helpers ────────────────────────────────────────────────────
-
-/** Discriminated union: either the parsed JSON payload or an error with status. */
-type ApiResult<T> = { ok: true; data: T } | { ok: false; error: string; status: number };
-
-/** POST JSON to an internal API route. Never throws — HTTP errors are returned as `{ ok: false }`. */
-const postApi = async <T>(
-  path: string,
-  body: unknown,
-  signal: AbortSignal,
-): Promise<ApiResult<T>> => {
-  const res = await fetch(path, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-    signal,
-  });
-
-  if (!res.ok) {
-    const json = await res.json().catch(() => ({}));
-    return {
-      ok: false,
-      error: json.error ?? `HTTP ${res.status}`,
-      status: res.status,
-    };
-  }
-
-  return { ok: true, data: (await res.json()) as T };
-};
-
-const isRetryableStatus = (status: number): boolean => status === 429 || status >= 500;
-
-/** POST with automatic retry. Non-retryable status codes bail immediately; retryable ones back off. */
-const postApiWithRetry = async <T>(
-  path: string,
-  body: unknown,
-  signal: AbortSignal,
-): Promise<T> =>
-  retry(async (bail) => {
-    const result = await postApi<T>(path, body, signal);
-    if (result.ok) return result.data;
-
-    if (!isRetryableStatus(result.status)) {
-      bail(new Error(result.error));
-      return undefined as never;
-    }
-    throw new Error(result.error);
-  }, RETRY_OPTS);
 
 // ─── Summarize phase ────────────────────────────────────────────────────────
 
@@ -120,7 +72,7 @@ const chunk = <T>(arr: T[], size: number): T[][] => {
 /**
  * Summarize a batch of URLs via the batch endpoint with retry.
  *
- * On success, dispatches SUMMARIZE_PAGE_DONE per page and SUMMARIZE_PAGE_FAILED
+ * On success, dispatches SUMMARIZE_BATCH_DONE per page and SUMMARIZE_BATCH_FAILED
  * for any per-page failures reported by the server. On total batch failure
  * (after retries), all URLs in the batch are marked as failed.
  */
@@ -159,13 +111,13 @@ const summarizeBatch = async (
             hasFailedOnce = true;
             for (const url of urls)
               dispatch({
-                type: 'SUMMARIZE_PAGE_FAILED',
+                type: 'SUMMARIZE_BATCH_FAILED',
                 url,
                 error: err.message,
                 retrying: true,
               });
           } else {
-            for (const url of urls) dispatch({ type: 'SUMMARIZE_PAGE_RETRYING', url });
+            for (const url of urls) dispatch({ type: 'SUMMARIZE_BATCH_RETRYING', url });
           }
         },
       },
@@ -175,15 +127,15 @@ const summarizeBatch = async (
 
     for (const page of result.results) {
       if (hasFailedOnce) {
-        dispatch({ type: 'SUMMARIZE_PAGE_RETRY_SUCCESS', url: page.meta.pageUrl, page });
+        dispatch({ type: 'SUMMARIZE_BATCH_RETRY_SUCCESS', url: page.meta.pageUrl, page });
       } else {
-        dispatch({ type: 'SUMMARIZE_PAGE_DONE', page });
+        dispatch({ type: 'SUMMARIZE_BATCH_DONE', page });
       }
       pages.push(page);
     }
     for (const f of result.failures) {
       dispatch({
-        type: 'SUMMARIZE_PAGE_FAILED',
+        type: 'SUMMARIZE_BATCH_FAILED',
         url: f.url,
         error: f.error,
         retrying: false,
@@ -196,10 +148,10 @@ const summarizeBatch = async (
     const error = (err as Error).message || 'Batch request failed';
     for (const url of urls) {
       if (hasFailedOnce) {
-        dispatch({ type: 'SUMMARIZE_PAGE_RETRY_EXHAUSTED', url });
+        dispatch({ type: 'SUMMARIZE_BATCH_RETRY_EXHAUSTED', url });
       } else {
         dispatch({
-          type: 'SUMMARIZE_PAGE_FAILED',
+          type: 'SUMMARIZE_BATCH_FAILED',
           url,
           error,
           retrying: false,
@@ -264,7 +216,7 @@ const summarizeAll = async (
  * drive state transitions and handles abort + error boundaries so the caller
  * only needs to provide an `AbortSignal` and a `dispatch` function.
  */
-export const runCrawlPipeline = async (
+export const runPipeline = async (
   url: string,
   config: PipelineConfig,
   apiKey: string,
@@ -274,7 +226,7 @@ export const runCrawlPipeline = async (
   const startMs = Date.now();
 
   try {
-    dispatch({ type: 'START_DISCOVER' });
+    dispatch({ type: 'START_DISCOVER_PHASE' });
 
     const discoverResult = await postApi<DiscoverResponse>(
       '/api/discover',
@@ -293,11 +245,18 @@ export const runCrawlPipeline = async (
     const { urls, site, method } = discoverResult.data;
 
     dispatch({
-      type: 'START_SUMMARIZE_PAGES',
+      type: 'START_SUMMARIZE_PHASE',
       total: urls.length,
       discoveryMethod: method,
     });
-    const { pages, failures } = await summarizeAll(urls, apiKey, site, config.concurrency, signal, dispatch);
+    const { pages, failures } = await summarizeAll(
+      urls,
+      apiKey,
+      site,
+      config.concurrency,
+      signal,
+      dispatch,
+    );
 
     if (signal.aborted) return;
 
@@ -306,7 +265,7 @@ export const runCrawlPipeline = async (
       return;
     }
 
-    dispatch({ type: 'START_ASSEMBLE' });
+    dispatch({ type: 'START_ASSEMBLE_PHASE' });
     const { llmsTxt } = await postApiWithRetry<AssembleResponse>(
       '/api/assemble',
       { pages, entryUrl: url, site, apiKey },

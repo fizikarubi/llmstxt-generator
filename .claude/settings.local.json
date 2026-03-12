@@ -32,9 +32,18 @@
       "Bash(npx vitest:*)",
       "Bash(curl -sI https://docs.astro.build/sitemap.xml 2>&1 | head -10)",
       "Bash(curl -sI https://nextjs.org/sitemap.xml 2>&1 | head -5)",
+      "Bash(node --conditions react-server --import tsx/esm scripts/generate.ts 2>&1)",
+      "Bash(npx tsx:*)",
+      "Bash(node -e \"\nconst data = require\\('./summarize_e861dcd3.json'\\);\nconst pages = [];\n// Duplicate the 30 pages ~17 times to get ~510 pages, varying URLs to make them unique\nfor \\(let i = 0; i < 17; i++\\) {\n  for \\(const p of data.pages\\) {\n    pages.push\\({\n      ...p,\n      meta: { ...p.meta, pageUrl: p.meta.pageUrl + '?v=' + i, mdUrl: p.meta.mdUrl },\n      title: p.title + ' \\(v' + i + '\\)',\n    }\\);\n  }\n}\nconst out = { ...data, pages };\nrequire\\('fs'\\).writeFileSync\\('summarize_mock_500.json', JSON.stringify\\(out, null, 2\\)\\);\nconsole.log\\('wrote ' + pages.length + ' pages'\\);\n\")",
+      "Bash(which gh:*)",
       "Bash(git add:*)",
-      "Bash(GIT_EDITOR=true git rebase --continue)",
-      "Bash(git rm:*)"
+      "Bash(git commit:*)",
+      "Bash(gh repo:*)",
+      "Bash(ls /Users/leo/Desktop/llmstxt-generator/*.md)",
+      "Bash(git pull:*)",
+      "Bash(git stash:*)",
+      "Bash(git push:*)",
+      "Bash(git mv:*)"
     ]
   }
 }

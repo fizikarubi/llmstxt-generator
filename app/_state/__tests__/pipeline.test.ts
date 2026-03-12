@@ -9,7 +9,7 @@ import type {
 import { DEFAULT_CONFIG } from '@/shared/types';
 import type { Action } from '../reducer';
 import { reducer } from '../reducer';
-import { runCrawlPipeline } from '../orchestrator';
+import { runPipeline } from '../pipeline';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -98,7 +98,7 @@ describe('runCrawlPipeline', { timeout: 30_000 }, () => {
     const { actions, dispatch } = collectActions();
     const abort = new AbortController();
 
-    await runCrawlPipeline(
+    await runPipeline(
       'https://example.com',
       DEFAULT_CONFIG,
       'key',
@@ -122,7 +122,7 @@ describe('runCrawlPipeline', { timeout: 30_000 }, () => {
     const { actions, dispatch } = collectActions();
     const abort = new AbortController();
 
-    await runCrawlPipeline(
+    await runPipeline(
       'https://example.com',
       DEFAULT_CONFIG,
       'key',
@@ -149,7 +149,7 @@ describe('runCrawlPipeline', { timeout: 30_000 }, () => {
     const { actions, dispatch } = collectActions();
     const abort = new AbortController();
 
-    await runCrawlPipeline(
+    await runPipeline(
       'https://example.com',
       DEFAULT_CONFIG,
       'key',
@@ -174,7 +174,7 @@ describe('runCrawlPipeline', { timeout: 30_000 }, () => {
     const { actions, dispatch } = collectActions();
     const abort = new AbortController();
 
-    await runCrawlPipeline(
+    await runPipeline(
       'https://example.com',
       DEFAULT_CONFIG,
       'key',
@@ -197,7 +197,7 @@ describe('runCrawlPipeline', { timeout: 30_000 }, () => {
     const { actions, dispatch } = collectActions();
     const abort = new AbortController();
 
-    await runCrawlPipeline(
+    await runPipeline(
       'https://example.com',
       DEFAULT_CONFIG,
       'key',
@@ -230,7 +230,7 @@ describe('runCrawlPipeline', { timeout: 30_000 }, () => {
     const { actions, dispatch } = collectActions();
     const abort = new AbortController();
 
-    await runCrawlPipeline(
+    await runPipeline(
       'https://example.com',
       DEFAULT_CONFIG,
       'key',
@@ -254,7 +254,7 @@ describe('runCrawlPipeline', { timeout: 30_000 }, () => {
     const { actions, dispatch } = collectActions();
     const abort = new AbortController();
 
-    await runCrawlPipeline(
+    await runPipeline(
       'https://example.com',
       DEFAULT_CONFIG,
       'key',
@@ -269,7 +269,7 @@ describe('runCrawlPipeline', { timeout: 30_000 }, () => {
     );
   });
 
-  it('dispatches SUMMARIZE_PAGE_FAILED for all URLs when batch fails', async () => {
+  it('dispatches SUMMARIZE_BATCH_FAILED for all URLs when batch fails', async () => {
     globalThis.fetch = mockFetch({
       '/api/discover': () => jsonResponse(DISCOVER_OK),
       '/api/summarize-batch': () => jsonResponse({ error: 'Timeout' }, 400),
@@ -278,7 +278,7 @@ describe('runCrawlPipeline', { timeout: 30_000 }, () => {
     const { actions, dispatch } = collectActions();
     const abort = new AbortController();
 
-    await runCrawlPipeline(
+    await runPipeline(
       'https://example.com',
       DEFAULT_CONFIG,
       'key',
@@ -286,7 +286,7 @@ describe('runCrawlPipeline', { timeout: 30_000 }, () => {
       dispatch,
     );
 
-    const failedActions = actions.filter((a) => a.type === 'SUMMARIZE_PAGE_FAILED');
+    const failedActions = actions.filter((a) => a.type === 'SUMMARIZE_BATCH_FAILED');
     expect(failedActions.length).toBe(2);
   });
 
@@ -309,7 +309,7 @@ describe('runCrawlPipeline', { timeout: 30_000 }, () => {
     const { actions, dispatch } = collectActions();
     const abort = new AbortController();
 
-    await runCrawlPipeline(
+    await runPipeline(
       'https://example.com',
       DEFAULT_CONFIG,
       'key',
@@ -324,12 +324,14 @@ describe('runCrawlPipeline', { timeout: 30_000 }, () => {
     // Retry-progress actions should have been dispatched
     const failedRetrying = actions.filter(
       (a) =>
-        a.type === 'SUMMARIZE_PAGE_FAILED' &&
-        (a as Extract<Action, { type: 'SUMMARIZE_PAGE_FAILED' }>).retrying,
+        a.type === 'SUMMARIZE_BATCH_FAILED' &&
+        (a as Extract<Action, { type: 'SUMMARIZE_BATCH_FAILED' }>).retrying,
     );
     expect(failedRetrying.length).toBeGreaterThan(0);
 
-    const retrySuccess = actions.filter((a) => a.type === 'SUMMARIZE_PAGE_RETRY_SUCCESS');
+    const retrySuccess = actions.filter(
+      (a) => a.type === 'SUMMARIZE_BATCH_RETRY_SUCCESS',
+    );
     expect(retrySuccess.length).toBeGreaterThan(0);
   });
 
@@ -347,7 +349,7 @@ describe('runCrawlPipeline', { timeout: 30_000 }, () => {
     const { actions, dispatch } = collectActions();
     const abort = new AbortController();
 
-    await runCrawlPipeline(
+    await runPipeline(
       'https://example.com',
       DEFAULT_CONFIG,
       'key',
@@ -374,7 +376,7 @@ describe('runCrawlPipeline', { timeout: 30_000 }, () => {
     const { actions, dispatch } = collectActions();
     const abort = new AbortController();
 
-    await runCrawlPipeline(
+    await runPipeline(
       'https://example.com',
       DEFAULT_CONFIG,
       'key',
@@ -403,7 +405,7 @@ describe('runCrawlPipeline', { timeout: 30_000 }, () => {
 
     const { actions, dispatch } = collectActions();
 
-    await runCrawlPipeline(
+    await runPipeline(
       'https://example.com',
       DEFAULT_CONFIG,
       'key',
@@ -432,7 +434,7 @@ describe('runCrawlPipeline', { timeout: 30_000 }, () => {
 
     const { actions, dispatch } = collectActions();
 
-    await runCrawlPipeline(
+    await runPipeline(
       'https://example.com',
       DEFAULT_CONFIG,
       'key',
@@ -459,7 +461,7 @@ describe('runCrawlPipeline', { timeout: 30_000 }, () => {
     const { actions, dispatch } = collectActions();
     const abort = new AbortController();
 
-    await runCrawlPipeline(
+    await runPipeline(
       'https://example.com',
       DEFAULT_CONFIG,
       'key',
@@ -489,7 +491,7 @@ describe('runCrawlPipeline', { timeout: 30_000 }, () => {
     const { actions, dispatch } = collectActions();
     const abort = new AbortController();
 
-    await runCrawlPipeline(
+    await runPipeline(
       'https://example.com',
       DEFAULT_CONFIG,
       'key',
@@ -497,10 +499,10 @@ describe('runCrawlPipeline', { timeout: 30_000 }, () => {
       dispatch,
     );
 
-    const startSummarize = actions.find((a) => a.type === 'START_SUMMARIZE_PAGES');
+    const startSummarize = actions.find((a) => a.type === 'START_SUMMARIZE_PHASE');
     expect(startSummarize).toBeDefined();
     expect(
-      (startSummarize as Extract<Action, { type: 'START_SUMMARIZE_PAGES' }>)
+      (startSummarize as Extract<Action, { type: 'START_SUMMARIZE_PHASE' }>)
         .discoveryMethod,
     ).toBe('sitemap');
   });
@@ -517,7 +519,7 @@ describe('runCrawlPipeline', { timeout: 30_000 }, () => {
     const { actions, dispatch } = collectActions();
     const abort = new AbortController();
 
-    await runCrawlPipeline(
+    await runPipeline(
       'https://example.com',
       DEFAULT_CONFIG,
       'key',
@@ -525,10 +527,10 @@ describe('runCrawlPipeline', { timeout: 30_000 }, () => {
       dispatch,
     );
 
-    const startSummarize = actions.find((a) => a.type === 'START_SUMMARIZE_PAGES');
+    const startSummarize = actions.find((a) => a.type === 'START_SUMMARIZE_PHASE');
     expect(startSummarize).toBeDefined();
     expect(
-      (startSummarize as Extract<Action, { type: 'START_SUMMARIZE_PAGES' }>)
+      (startSummarize as Extract<Action, { type: 'START_SUMMARIZE_PHASE' }>)
         .discoveryMethod,
     ).toBe('bfs');
 

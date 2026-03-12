@@ -259,7 +259,6 @@ const discoverFromBfs = async (
     depth <= maxDepth && queue.length > 0 && found.length < cap;
     depth++
   ) {
-
     const nextQueue: string[] = [];
 
     let fetched = 0;

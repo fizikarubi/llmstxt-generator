@@ -29,65 +29,6 @@ const extractResponseText = (response: Anthropic.Message): string =>
   response.content[0].type === 'text' ? response.content[0].text : '';
 
 /**
- * Ask the LLM to classify and summarize a single page.
- *
- * Input text is truncated to 6000 chars (~1.5k tokens) to keep per-page
- * costs low and stay well within the context window. Output is capped at
- * 250 tokens — enough for a title, one-sentence summary, and a boolean.
- */
-export const summarizePage = async (
-  ctx: Context,
-  client: Anthropic,
-  pageInfo: PageInfo,
-  textContent: string,
-  site: SiteInfo,
-): Promise<PageSummary> =>
-  withTrace(ctx, 'summarizePage', { url: pageInfo.pageUrl }, async () => {
-    const siteContext = [
-      `Site: "${site.name}"`,
-      site.description ? `Description: "${site.description}"` : '',
-    ]
-      .filter(Boolean)
-      .join('\n');
-
-    const response = await client.messages.create({
-      model: MODEL,
-      max_tokens: SUMMARIZE_MAX_TOKENS,
-      messages: [
-        {
-          role: 'user',
-          content: `You are summarizing a web page for an llms.txt file.
-
-${siteContext}
-Page URL: ${pageInfo.pageUrl}
-
-Page content:
-${textContent.slice(0, 6_000)}
-
-Produce a JSON object with EXACTLY these fields:
-- "title": A clean, descriptive title for this page (no site name prefixes).
-- "summary": A single, concise sentence describing the page's content for an LLM.
-- "isSupplementary": boolean (true ONLY if this is secondary/skippable info like changelogs, legal, about us, pricing, or community links. False for docs, guides, code, and tutorials).
-
-Respond with ONLY valid JSON, no markdown fences.`,
-        },
-      ],
-    });
-
-    const raw = extractResponseText(response)
-      .replace(/^```(?:json)?\s*|\s*```$/g, '')
-      .trim();
-    const parsed = JSON.parse(raw);
-
-    return {
-      meta: pageInfo,
-      title: parsed.title,
-      summary: parsed.summary,
-      isSupplementary: parsed.isSupplementary,
-    };
-  });
-
-/**
  * Summarize a batch of pages in a single LLM call.
  *
  * The system message carries the static instructions (with cache_control so
