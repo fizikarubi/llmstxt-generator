@@ -33,7 +33,7 @@ const DISCOVER_OK: DiscoverResponse = {
 const ASSEMBLE_OK: AssembleResponse = { llmsTxt: '# Example\n> Test' };
 
 const makeBatchOk = (...pages: PageSummary[]): SummarizeBatchResponse => ({
-  results: pages,
+  summaries: pages,
   failures: [],
 });
 
@@ -221,7 +221,7 @@ describe('runCrawlPipeline', { timeout: 30_000 }, () => {
       '/api/discover': () => jsonResponse(DISCOVER_OK),
       '/api/summarize-batch': () =>
         jsonResponse({
-          results: [page1],
+          summaries: [page1],
           failures: [{ url: 'https://example.com/b', error: 'LLM rate limited' }],
         }),
       '/api/assemble': () => jsonResponse(ASSEMBLE_OK),
@@ -264,8 +264,8 @@ describe('runCrawlPipeline', { timeout: 30_000 }, () => {
     const state = replayState(actions);
 
     expect(state.status).toBe('error');
-    expect((state as Extract<AppState, { status: 'error' }>).message).toContain(
-      'failed to summarize',
+    expect((state as Extract<AppState, { status: 'error' }>).message).toBe(
+      'Page fetch timeout',
     );
   });
 
@@ -310,8 +310,8 @@ describe('runCrawlPipeline', { timeout: 30_000 }, () => {
 
     const state = replayState(actions);
     expect(state.status).toBe('error');
-    expect((state as Extract<AppState, { status: 'error' }>).message).toContain(
-      'failed to summarize',
+    expect((state as Extract<AppState, { status: 'error' }>).message).toBe(
+      'Temporary error',
     );
   });
 

@@ -44,7 +44,14 @@
       "Bash(git stash:*)",
       "Bash(git push:*)",
       "Bash(git mv:*)",
-      "Bash(ls -la /Users/leo/Desktop/llmstxt-generator/ | grep -E \"\\\\.md$|test|spec\")"
+      "Bash(ls -la /Users/leo/Desktop/llmstxt-generator/ | grep -E \"\\\\.md$|test|spec\")",
+      "WebFetch(domain:crawlee.dev)",
+      "Bash(find /Users/leo/Desktop/llmstxt-generator -type f -name \"*pipeline*\" -o -name \"*orchestrator*\" | grep -E \"\\\\.\\(ts|tsx\\)$\")",
+      "WebFetch(domain:www.npmjs.com)",
+      "Bash(find /Users/leo/Desktop/llmstxt-generator/server -type f -name \"*llm*\" -o -name \"*client*\" | grep -E \"\\\\.ts$\")",
+      "Bash(grep -n \"from.*scraping\" /Users/leo/Desktop/llmstxt-generator/server/usecases/*.ts /Users/leo/Desktop/llmstxt-generator/server/lib/robots.ts 2>/dev/null)",
+      "Bash(find /Users/leo/Desktop/llmstxt-generator -type f -name \"package.json\" -o -name \"tsconfig.json\" -o -name \".env*\" -o -name \"*.config.js\" -o -name \"*.config.ts\" 2>/dev/null | head -20)",
+      "WebFetch(domain:fastht.ml)"
     ]
   }
 }

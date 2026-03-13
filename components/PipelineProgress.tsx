@@ -76,6 +76,11 @@ const PipelineProgress = ({ state, onCancel }: Props) => {
       <div className="flex items-center justify-between">
         <div className="space-y-1">
           <p className="text-sm font-medium text-white">{label}</p>
+          {state.status === 'discovering' && (
+            <p className="text-xs text-zinc-500">
+              This may take a while for sites that require crawling.
+            </p>
+          )}
           {progress && (
             <p className="text-xs text-zinc-500">
               {isBfs

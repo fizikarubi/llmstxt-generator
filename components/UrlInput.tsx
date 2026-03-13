@@ -11,9 +11,9 @@ interface Props {
 const UrlInput = ({ onSubmit, disabled }: Props) => {
   const [url, setUrl] = useState('');
   const [apiKey, setApiKey] = useState('');
-  const [maxPages, setMaxPages] = useState<number | null>(null);
+  const [maxPages, setMaxPages] = useState<number | null>(200);
   const [concurrency, setConcurrency] = useState(10);
-  const [showSettings, setShowSettings] = useState(false);
+  const [showSettings, setShowSettings] = useState(true);
   const [error, setError] = useState('');
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -95,26 +95,24 @@ const UrlInput = ({ onSubmit, disabled }: Props) => {
           </label>
           <input
             type="range"
-            min={0}
-            max={1000}
+            min={1}
+            max={1001}
             step={10}
-            value={maxPages ?? 0}
+            value={maxPages ?? 1001}
             onChange={(e) => {
               const v = Number(e.target.value);
-              setMaxPages(v === 0 ? null : v);
+              setMaxPages(v >= 1001 ? null : v);
             }}
             disabled={disabled}
             className="w-full accent-white disabled:opacity-50"
           />
           <p className="text-xs text-zinc-500">
-            Drag to 0 for no limit. Each page uses one API call.
+            Drag all the way right for no limit. Each page uses one API call.
           </p>
-          {(maxPages === null || maxPages > 600) && (
-            <p className="text-xs text-amber-400">
-              We recommend staying under 600 pages — Haiku's 64k token output limit may
-              truncate larger results.
-            </p>
-          )}
+          <p className={`text-xs ${maxPages === null || maxPages > 600 ? 'text-amber-400' : 'text-zinc-500'}`}>
+            We recommend staying under 600 pages — Haiku&apos;s 64k max output tokens may
+            truncate larger results.
+          </p>
 
           <label className="flex items-center justify-between text-sm text-zinc-300">
             <span>Concurrency</span>

@@ -11,7 +11,7 @@ export interface PipelineConfig {
 }
 
 export const DEFAULT_CONFIG: PipelineConfig = {
-  maxPages: null,
+  maxPages: 200,
   concurrency: 10,
 };
 
@@ -81,7 +81,7 @@ export interface SummarizeBatchRequest {
 }
 
 export interface SummarizeBatchResponse {
-  results: PageSummary[];
+  summaries: PageSummary[];
   failures: { url: string; error: string }[];
 }
 

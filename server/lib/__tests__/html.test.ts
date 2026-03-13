@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { extractSiteInfo, extractText, isSpaShell, extractDescription } from '../html';
+import { html } from '../html';
+
+const { extractSiteInfo, extractText, isSpaShell, extractDescription } = html;
 
 // ─── extractSiteInfo ─────────────────────────────────────────────────────────
 
@@ -15,29 +17,9 @@ describe('extractSiteInfo', () => {
     expect(extractSiteInfo(html, url).name).toBe('My Project');
   });
 
-  it('falls back to title before separator', () => {
+  it('falls back to full title when no og:site_name', () => {
     const html = `<html><head><title>Next.js | The React Framework</title></head><body></body></html>`;
-    expect(extractSiteInfo(html, url).name).toBe('Next.js');
-  });
-
-  it('handles dash separator in title', () => {
-    const html = `<html><head><title>Docs - MyLib</title></head><body></body></html>`;
-    expect(extractSiteInfo(html, url).name).toBe('Docs');
-  });
-
-  it('handles en-dash separator', () => {
-    const html = `<html><head><title>Guide – Framework</title></head><body></body></html>`;
-    expect(extractSiteInfo(html, url).name).toBe('Guide');
-  });
-
-  it('handles middle-dot separator', () => {
-    const html = `<html><head><title>API · SDK</title></head><body></body></html>`;
-    expect(extractSiteInfo(html, url).name).toBe('API');
-  });
-
-  it('handles bullet separator', () => {
-    const html = `<html><head><title>Home • Brand</title></head><body></body></html>`;
-    expect(extractSiteInfo(html, url).name).toBe('Home');
+    expect(extractSiteInfo(html, url).name).toBe('Next.js | The React Framework');
   });
 
   it('falls back to h1 when no og:site_name or title', () => {
@@ -61,12 +43,12 @@ describe('extractSiteInfo', () => {
     expect(extractSiteInfo(html, url).description).toBe('OG desc.');
   });
 
-  it('truncates long descriptions at sentence boundary', () => {
-    const longDesc = 'A'.repeat(100) + '. ' + 'B'.repeat(200);
+  it('truncates long descriptions at word boundary with ellipsis', () => {
+    const longDesc = 'A'.repeat(100) + ' ' + 'B'.repeat(200);
     const html = `<html><head><meta name="description" content="${longDesc}"><title>X</title></head><body></body></html>`;
     const desc = extractSiteInfo(html, url).description;
-    expect(desc.length).toBeLessThanOrEqual(251); // 250 + possible period
-    expect(desc).toContain('.');
+    expect(desc.endsWith('…')).toBe(true);
+    expect(desc.length).toBeLessThanOrEqual(251); // 250 + ellipsis char
   });
 
   it('truncates with ellipsis when no sentence boundary', () => {

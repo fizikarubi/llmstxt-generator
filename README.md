@@ -12,8 +12,8 @@ https://github.com/user-attachments/assets/941a2839-7537-4b26-afc6-1526ff417972
 
 The browser orchestrates three short-lived serverless endpoints in sequence — no Redis, no queue, no workers:
 
-1. **Discover** — crawl the site via sitemap (preferred) or BFS fallback with 50 concurrent fetches, max depth 3. Filter, deduplicate, and normalize URLs.
-2. **Summarize** — chunk discovered URLs into batches of 20 and fan out concurrent requests (configurable, default 10) to a serverless function. Each batch fetches pages, extracts text, and summarizes them via Claude Haiku in a single LLM call. A 429 from any batch stops the queue and assembles with whatever pages succeeded.
+1. **Discover** — crawl the site via sitemap (preferred) or BFS fallback with 20 concurrent fetches (rate-limited to 20 req/s), max depth 2. Filter, deduplicate, and normalize URLs.
+2. **Summarize** — chunk discovered URLs into batches of 10 and fan out concurrent requests (configurable, default 10) to a serverless function. Each batch fetches pages, extracts text, and summarizes them via Claude Haiku in a single LLM call. A 429 from any batch stops the queue and assembles with whatever pages succeeded.
 3. **Assemble** — aggregate all page summaries and send them to Claude in one call to generate the final structured llms.txt. Haiku's 64k output token limit caps practical output at ~600 pages.
 
 ```
@@ -46,7 +46,7 @@ User enters URL
 ### Key highlights
 
 - **Client-side orchestration** — the browser coordinates the entire pipeline via a `useReducer` state machine (6 states, 9 action types), keeping the backend fully stateless
-- **Concurrency control** — rate-limited fan-out (configurable concurrency + minTime throttle) via p-queue; a 429 from any batch skips remaining work and assembles with partial results
+- **Concurrency control** — configurable concurrency via p-queue; a 429 from any batch skips remaining work and assembles with partial results
 - **Partial failure tolerance** — uses `Promise.allSettled` so a crawl succeeds even if some pages fail; shows cause-aware errors (rate-limit vs generic failure) when zero pages return
 - **Abort propagation** — a single `AbortController` cancels in-flight fetches, drains the job queue, and cleanly exits retries
 - **Structured observability** — every request gets a UUID trace ID via Pino; `withTrace` wraps async functions with automatic START/END/ERROR logging

@@ -9,7 +9,7 @@
  *
  *   2. **Summarize** – POST `/api/summarize-batch` for batches of URLs.
  *      URLs are chunked into groups of BATCH_SIZE and processed concurrently
- *      using p-queue for rate-limiting. Each batch is a single attempt — no
+ *      concurrency-limited via p-queue. Each batch is a single attempt — no
  *      retries. A 429 from any batch aborts the entire queue so no further
  *      batches start. The UI is kept in sync via dispatch actions:
  *        - `SUMMARIZE_BATCH_DONE`   – page summarized successfully
@@ -18,8 +18,8 @@
  *      least one page was summarized.
  *
  *   3. **Assemble** – POST `/api/assemble` to combine all page summaries into
- *      the final llms.txt output. This call uses `postApiWithRetry` (same
- *      exponential back-off config) since it is a single request.
+ *      the final llms.txt output. This call uses `postApiWithRetry` with
+ *      exponential back-off since it is a single critical request.
  *
  * Abort handling:
  *   The caller passes an `AbortSignal`. On abort the pipeline:
@@ -46,9 +46,6 @@ import type {
 import type { Action } from './reducer';
 import { postApi, postApiWithRetry } from './api';
 
-const SUMMARIZE_BATCH_SIZE = 20;
-const SUMMARIZE_MIN_TIME_MS = 500;
-
 // ─── Summarize phase ────────────────────────────────────────────────────────
 
 /** Split an array into chunks of `size`. */
@@ -61,13 +58,10 @@ const chunk = <T>(arr: T[], size: number): T[][] => {
 };
 
 /**
- * Summarize a batch of URLs via the batch endpoint (single attempt).
+ * Summarize a batch of URLs (single attempt, no retries).
  *
- * No retries — each batch either succeeds or fails once. A 429 response
- * aborts the shared rateLimitController so all queued batches are cancelled
- * immediately. On success, dispatches SUMMARIZE_BATCH_DONE per page and
- * SUMMARIZE_BATCH_FAILED for any per-page failures. On total batch failure,
- * all URLs in the batch are marked as failed.
+ * - A 429 or billing error aborts all queued batches via `rateLimitController`.
+ * - Partial success within a batch is kept (per-page summaries + failures).
  */
 const summarizeBatch = async (
   urls: string[],
@@ -77,7 +71,9 @@ const summarizeBatch = async (
   dispatch: (action: Action) => void,
   rateLimitController: AbortController,
 ): Promise<{ pages: PageSummary[]; failures: PageFailure[] }> => {
-  if (signal.aborted) return { pages: [], failures: [] };
+  if (signal.aborted) {
+    return { pages: [], failures: [] };
+  }
 
   const pages: PageSummary[] = [];
   const failures: PageFailure[] = [];
@@ -90,7 +86,7 @@ const summarizeBatch = async (
     );
 
     if (r.ok) {
-      for (const page of r.data.results) {
+      for (const page of r.data.summaries) {
         dispatch({ type: 'SUMMARIZE_BATCH_DONE', page });
         pages.push(page);
       }
@@ -123,7 +119,9 @@ const summarizeBatch = async (
       failures.push({ url, error: r.error });
     }
   } catch (err: unknown) {
-    if ((err as Error).name === 'AbortError') return { pages: [], failures: [] };
+    if ((err as Error).name === 'AbortError') {
+      return { pages: [], failures: [] };
+    }
 
     const error = (err as Error).message || 'Batch request failed';
     for (const url of urls) {
@@ -135,12 +133,14 @@ const summarizeBatch = async (
   return { pages, failures };
 };
 
+const SUMMARIZE_BATCH_SIZE = 10;
+
 /**
- * Summarize all discovered URLs in batches.
+ * Summarize all discovered URLs in batches with bounded concurrency.
  *
- * Chunks URLs into groups of BATCH_SIZE and processes them concurrently
- * via p-queue. Each batch is a single attempt — no retries. A 429 from
- * any batch aborts all queued batches via a shared AbortController.
+ * Chunks into groups of BATCH_SIZE, rate-limited via p-queue. A 429 from
+ * any batch kills the entire queue (fail-fast). Partial results are always
+ * collected so the pipeline can assemble from whatever succeeded.
  */
 const summarizeAll = async (
   urls: string[],
@@ -150,11 +150,7 @@ const summarizeAll = async (
   signal: AbortSignal,
   dispatch: (action: Action) => void,
 ): Promise<{ pages: PageSummary[]; failures: PageFailure[]; rateLimited: boolean }> => {
-  const limiter = new PQueue({
-    concurrency,
-    intervalCap: 1,
-    interval: SUMMARIZE_MIN_TIME_MS,
-  });
+  const limiter = new PQueue({ concurrency });
   const rateLimitController = new AbortController();
 
   signal.addEventListener('abort', () => {
@@ -162,37 +158,39 @@ const summarizeAll = async (
   });
 
   const batches = chunk(urls, SUMMARIZE_BATCH_SIZE);
-  const promises = batches.map((batch) =>
-    limiter
-      .add(
-        () => summarizeBatch(batch, apiKey, site, signal, dispatch, rateLimitController),
-        { signal: rateLimitController.signal },
-      )
-      .catch(() => ({ pages: [] as PageSummary[], failures: [] as PageFailure[] })),
+  const results = await Promise.all(
+    batches.map((batch) =>
+      limiter
+        .add(
+          () =>
+            summarizeBatch(batch, apiKey, site, signal, dispatch, rateLimitController),
+          { signal: rateLimitController.signal },
+        )
+        // p-queue rejects with AbortError when rateLimitController fires
+        .catch(() => ({ pages: [] as PageSummary[], failures: [] as PageFailure[] })),
+    ),
   );
-
-  const results = await Promise.allSettled(promises);
 
   const pages: PageSummary[] = [];
   const failures: PageFailure[] = [];
 
   for (const result of results) {
-    if (result.status !== 'fulfilled') continue;
-    pages.push(...result.value.pages);
-    failures.push(...result.value.failures);
+    pages.push(...result.pages);
+    failures.push(...result.failures);
   }
 
   return { pages, failures, rateLimited: rateLimitController.signal.aborted };
 };
 
-// ─── Public pipeline ─────────────────────────────────────────────────────────
-
 /**
  * Run the full discover → summarize → assemble pipeline.
  *
- * This is the single entry point called by the UI. It dispatches actions to
- * drive state transitions and handles abort + error boundaries so the caller
- * only needs to provide an `AbortSignal` and a `dispatch` function.
+ *   1. **Discover** — find URLs (single request, fatal on failure)
+ *   2. **Summarize** — LLM-summarize pages (batched, partial failure OK)
+ *   3. **Assemble** — combine into llms.txt (retries with back-off)
+ *
+ * Prefers partial output over total failure — assembles whatever pages
+ * succeeded. Abort returns silently (no ERROR dispatch).
  */
 export const runPipeline = async (
   url: string,
@@ -244,7 +242,7 @@ export const runPipeline = async (
         ? 'Your Anthropic API credit balance is too low. Please add credits and try again.'
         : rateLimited
           ? `Rate-limited by the API \u2014 all ${failures.length} pages failed. Try lowering concurrency.`
-          : `All ${failures.length} pages failed to summarize. Check the error details and try again.`;
+          : (failures[0]?.error ?? 'All pages failed to summarize.');
       dispatch({ type: 'ERROR', message });
       return;
     }

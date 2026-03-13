@@ -35,7 +35,8 @@ export const postApi = async <T>(
     };
   }
 
-  return { ok: true, data: (await res.json()) as T };
+  const data = (await res.json()) as T;
+  return { ok: true, data };
 };
 
 export const isRetryableStatus = (status: number): boolean =>

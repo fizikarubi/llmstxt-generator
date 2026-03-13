@@ -2,12 +2,13 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { Context } from '@/server/lib/context';
 import { assembleUseCase } from '../assemble';
 
-vi.mock('@/server/lib/llm', () => ({
-  createClient: vi.fn().mockReturnValue({}),
-  assembleWithLlm: vi.fn(),
+vi.mock('@/server/lib/anthropic', () => ({
+  anthropic: {
+    assemblePageSummaries: vi.fn(),
+  },
 }));
 
-import { assembleWithLlm } from '@/server/lib/llm';
+import { anthropic } from '@/server/lib/anthropic';
 
 const makeCtx = () =>
   ({
@@ -32,7 +33,9 @@ describe('assembleUseCase', () => {
   afterEach(() => vi.restoreAllMocks());
 
   it('returns assembled llms.txt on success', async () => {
-    vi.mocked(assembleWithLlm).mockResolvedValue('# Example\n> A great site');
+    vi.mocked(anthropic.assemblePageSummaries).mockResolvedValue(
+      '# Example\n> A great site',
+    );
 
     const ctx = makeCtx();
     const result = await assembleUseCase.run(ctx, {
