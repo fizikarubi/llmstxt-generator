@@ -200,7 +200,7 @@ describe('summarizeBatchUseCase', () => {
     expect(result.summaries[0].meta.mdUrl).toBe('https://example.com/docs.md');
   });
 
-  it('returns failures when LLM call fails', async () => {
+  it('throws when LLM call fails', async () => {
     vi.mocked(fetchHtml).mockResolvedValue({
       url: 'https://example.com/docs',
       html: '<html><body><p>Content</p></body></html>',
@@ -214,14 +214,12 @@ describe('summarizeBatchUseCase', () => {
     );
 
     const ctx = makeCtx();
-    const result = await summarizeBatchUseCase.run(ctx, {
-      urls: ['https://example.com/docs'],
-      apiKey: 'sk-test',
-      site: { name: 'Example', description: '' },
-    });
-    expect(result.summaries).toEqual([]);
-    expect(result.failures).toEqual([
-      { url: 'https://example.com/docs', error: 'Anthropic: Rate limit exceeded' },
-    ]);
+    await expect(
+      summarizeBatchUseCase.run(ctx, {
+        urls: ['https://example.com/docs'],
+        apiKey: 'sk-test',
+        site: { name: 'Example', description: '' },
+      }),
+    ).rejects.toThrow('Anthropic: Rate limit exceeded');
   });
 });

@@ -6,7 +6,6 @@ import type { DiscoverRequest } from '@/shared/types';
 import { getErrorMessage, getErrorStatus } from '@/server/lib/errors';
 
 export const runtime = 'nodejs';
-export const maxDuration = 60;
 
 export const POST = async (req: NextRequest) => {
   const ctx = newContext();

@@ -70,13 +70,12 @@ const summarizeBatch = async (
   signal: AbortSignal,
   dispatch: (action: Action) => void,
   rateLimitController: AbortController,
-): Promise<{ pages: PageSummary[]; failures: PageFailure[] }> => {
+  pages: PageSummary[],
+  failures: PageFailure[],
+): Promise<void> => {
   if (signal.aborted) {
-    return { pages: [], failures: [] };
+    return;
   }
-
-  const pages: PageSummary[] = [];
-  const failures: PageFailure[] = [];
 
   try {
     const r = await postApi<SummarizeBatchResponse>(
@@ -94,33 +93,29 @@ const summarizeBatch = async (
         dispatch({ type: 'SUMMARIZE_BATCH_FAILED', url: f.url, error: f.error });
         failures.push({ url: f.url, error: f.error });
       }
-      return { pages, failures };
+      return;
     }
 
-    // 429 → flag rate-limit and abort all queued batches
-    if (r.status === 429) {
-      dispatch({ type: 'RATE_LIMITED' });
-      rateLimitController.abort();
-    }
-
-    // Unrecoverable billing/auth errors → stop immediately and surface to user
-    if (r.status === 400 && /credit balance/i.test(r.error)) {
-      for (const url of urls) {
-        dispatch({ type: 'SUMMARIZE_BATCH_FAILED', url, error: r.error });
-        failures.push({ url, error: r.error });
-      }
-      rateLimitController.abort();
-      return { pages, failures };
-    }
-
-    // Any error — mark all URLs as failed
+    // Any non-ok response → mark all URLs in this batch as failed
     for (const url of urls) {
       dispatch({ type: 'SUMMARIZE_BATCH_FAILED', url, error: r.error });
       failures.push({ url, error: r.error });
     }
+
+    // 429 → abort remaining batches
+    if (r.status === 429) {
+      dispatch({ type: 'RATE_LIMITED' });
+      rateLimitController.abort();
+      return;
+    }
+
+    // Billing errors → also abort remaining batches
+    if (r.status === 400 && /credit balance/i.test(r.error)) {
+      rateLimitController.abort();
+    }
   } catch (err: unknown) {
     if ((err as Error).name === 'AbortError') {
-      return { pages: [], failures: [] };
+      return;
     }
 
     const error = (err as Error).message || 'Batch request failed';
@@ -129,8 +124,6 @@ const summarizeBatch = async (
       failures.push({ url, error });
     }
   }
-
-  return { pages, failures };
 };
 
 const SUMMARIZE_BATCH_SIZE = 10;
@@ -157,27 +150,40 @@ const summarizeAll = async (
     limiter.clear();
   });
 
+  const pages: PageSummary[] = [];
+  const failures: PageFailure[] = [];
+
   const batches = chunk(urls, SUMMARIZE_BATCH_SIZE);
-  const results = await Promise.all(
+  await Promise.all(
     batches.map((batch) =>
       limiter
         .add(
           () =>
-            summarizeBatch(batch, apiKey, site, signal, dispatch, rateLimitController),
+            summarizeBatch(
+              batch,
+              apiKey,
+              site,
+              signal,
+              dispatch,
+              rateLimitController,
+              pages,
+              failures,
+            ),
           { signal: rateLimitController.signal },
         )
-        // p-queue rejects with AbortError when rateLimitController fires
-        .catch(() => ({ pages: [] as PageSummary[], failures: [] as PageFailure[] })),
+        // Batch was aborted before it could run — record its URLs as failures
+        .catch(() => {
+          for (const url of batch) {
+            dispatch({
+              type: 'SUMMARIZE_BATCH_FAILED',
+              url,
+              error: 'Skipped (queue aborted)',
+            });
+            failures.push({ url, error: 'Skipped (queue aborted)' });
+          }
+        }),
     ),
   );
-
-  const pages: PageSummary[] = [];
-  const failures: PageFailure[] = [];
-
-  for (const result of results) {
-    pages.push(...result.pages);
-    failures.push(...result.failures);
-  }
 
   return { pages, failures, rateLimited: rateLimitController.signal.aborted };
 };
@@ -219,6 +225,11 @@ export const runPipeline = async (
     }
 
     const { urls, site, method } = discoverResult.data;
+
+    if (urls.length === 0) {
+      dispatch({ type: 'ERROR', message: 'No pages found on this site.' });
+      return;
+    }
 
     dispatch({
       type: 'START_SUMMARIZE_PHASE',

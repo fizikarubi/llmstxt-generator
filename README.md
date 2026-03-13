@@ -45,11 +45,11 @@ User enters URL
 
 ### Key highlights
 
-- **Client-side orchestration** — the browser coordinates the entire pipeline via a `useReducer` state machine (6 states, 9 action types), keeping the backend fully stateless
-- **Concurrency control** — configurable concurrency via p-queue; a 429 from any batch skips remaining work and assembles with partial results
-- **Partial failure tolerance** — uses `Promise.allSettled` so a crawl succeeds even if some pages fail; shows cause-aware errors (rate-limit vs generic failure) when zero pages return
-- **Abort propagation** — a single `AbortController` cancels in-flight fetches, drains the job queue, and cleanly exits retries
-- **Structured observability** — every request gets a UUID trace ID via Pino; `withTrace` wraps async functions with automatic START/END/ERROR logging
+- **Stateless backend** — the browser drives the pipeline via `useReducer`; serverless functions are pure request/response with no shared state
+- **Graceful degradation** — a 429 from any batch stops the queue and assembles with whatever succeeded; individual page failures don't block the rest
+- **Configurable concurrency** — users tune parallelism from the UI; p-queue enforces the limit across batches
+- **Cancellable at any phase** — one `AbortController` propagates through fetches, the job queue, and retries
+- **Traced requests** — every request gets a UUID; `withTrace` logs START/END/ERROR spans via Pino
 
 For the full system design, state machine, endpoint contracts, and project structure, see [ARCHITECTURE.md](ARCHITECTURE.md).
 

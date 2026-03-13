@@ -7,7 +7,7 @@ llms.txt generator — crawl any website and produce a spec-compliant [llms.txt]
 The app uses a **fan-out architecture** to avoid serverless function timeouts. Instead of one long-running function, the work is split across three short-lived endpoints orchestrated by the client:
 
 1. **Discover** — crawl the site via sitemap (preferred) or BFS fallback with 20 concurrent fetches (rate-limited to 20 req/s), max depth 2. Check robots.txt, filter, deduplicate, and normalize URLs. Over-provisions by 1.3× to account for pages lost to filtering.
-2. **Summarize** — chunk discovered URLs into batches of 10 and fan out up to 10 concurrent requests to a serverless function. Each function invocation fetches the pages' HTML, extracts text with cheerio, and summarizes the entire batch via Claude Haiku in a single LLM call. A 429 from any batch aborts remaining batches; the pipeline continues to assemble with whatever pages succeeded.
+2. **Summarize** — chunk discovered URLs into batches of 10 and fan out concurrent requests (configurable, default 10) to a serverless function. Each batch fetches pages, extracts text, and summarizes them via Claude Haiku in a single LLM call. A 429 from any batch stops the queue and assembles with whatever pages succeeded.
 3. **Assemble** — aggregate all page summaries and send them to Claude in one streaming call. The LLM groups pages into logical H2 sections and places supplementary pages under `## Optional`. Haiku's 64k output token limit caps practical output at ~600 pages.
 
 ```
@@ -35,7 +35,7 @@ User enters URL + API key
  │            │    │ Haiku batch   │    │ → llms.txt  │
  │ → urls[]   │    │ summarize     │    └─────────────┘
  └────────────┘    │               │
-                   │ batch: 10     │
+                   │ batch: 5      │
                    │ concurrency:10│
                    │ 429 → partial │
                    │               │

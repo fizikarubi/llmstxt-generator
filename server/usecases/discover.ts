@@ -90,16 +90,19 @@ export const discoverUseCase: UseCase<DiscoverRequest, DiscoverResponse> = {
         );
       }
 
-      if (discoveredUrls.length === 0) {
-        throw new AppError('No pages found — site may require JavaScript to render', 404);
-      }
-
       const urls = deduplicateUrls(
         discoveredUrls,
         entryUrl.href,
         robots.isAllowed,
         maxPages,
       );
+
+      if (urls.length === 0) {
+        throw new AppError(
+          'No pages found — site may require JavaScript to render or got redirected',
+          404,
+        );
+      }
 
       return { urls, site, method };
     }),

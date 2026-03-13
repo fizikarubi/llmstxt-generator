@@ -5,6 +5,8 @@ import { summarizeBatchUseCase } from '@/server/usecases/summarize-batch';
 import type { SummarizeBatchRequest } from '@/shared/types';
 import { getErrorMessage, getErrorStatus } from '@/server/lib/errors';
 
+export const runtime = 'nodejs';
+
 export const POST = async (req: NextRequest) => {
   const ctx = newContext();
   try {

@@ -230,7 +230,6 @@ const discoverFromSitemap = (
     return capped;
   });
 
-
 const BFS_CONCURRENCY = 20;
 /**
  * Discover pages via breadth-first crawl

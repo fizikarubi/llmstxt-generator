@@ -109,7 +109,9 @@ const UrlInput = ({ onSubmit, disabled }: Props) => {
           <p className="text-xs text-zinc-500">
             Drag all the way right for no limit. Each page uses one API call.
           </p>
-          <p className={`text-xs ${maxPages === null || maxPages > 600 ? 'text-amber-400' : 'text-zinc-500'}`}>
+          <p
+            className={`text-xs ${maxPages === null || maxPages > 600 ? 'text-amber-400' : 'text-zinc-500'}`}
+          >
             We recommend staying under 600 pages — Haiku&apos;s 64k max output tokens may
             truncate larger results.
           </p>
