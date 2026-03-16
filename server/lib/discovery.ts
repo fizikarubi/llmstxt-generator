@@ -271,7 +271,7 @@ const discoverFromBfs = (
     ) {
       const nextQueue = new Set<string>();
 
-      const remaining = (cap - found.length) * Math.floor(1.3);
+      const remaining = Math.floor((cap - found.length) * 1.3);
       const batch = queue.length > remaining ? queue.slice(0, remaining) : queue;
 
       await Promise.allSettled(
