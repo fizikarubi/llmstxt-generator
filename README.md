@@ -132,4 +132,3 @@ vercel
 ## Documentation
 
 - [ARCHITECTURE.md](ARCHITECTURE.md) — system design, endpoints, state machine, concurrency model
-- [LLMSTXT_SPEC.md](LLMSTXT_SPEC.md) — the llms.txt specification reference

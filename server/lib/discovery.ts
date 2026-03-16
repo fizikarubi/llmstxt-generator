@@ -191,7 +191,6 @@ const fetchSitemapUrls = (ctx: Context, url: string): Promise<string[]> =>
           .filter(Boolean);
       }
     } catch {
-      // withTrace already logs the error
     }
     return [];
   });

@@ -171,7 +171,7 @@ Site URL: ${entryUrl}
 Detected site name (may just be a hostname — use only as a hint): ${nameHint}
 ${site.description ? `Site description: ${site.description}` : ''}
 
-Below is a flat list of all the pages on this site, along with a brief summary. Some are marked with [SUPPLEMENTARY].
+Below is a flat list of all the pages on this site, along with a brief summary. Some are marked with [SUPPLEMENTARY] — these are hints from a prior classification pass suggesting the page is secondary. Use your own judgment to confirm or override these hints based on the full site context.
 
 ${flatList}
 
@@ -180,8 +180,8 @@ Generate a complete llms.txt file strictly following this spec:
 1. An H1 header with the project's proper name. Infer the correct casing and name from the page titles, URLs, and content. The detected site name above is only a hint and may be inaccurate — prefer evidence from the pages themselves.
 2. A blockquote starting with "> " containing a concise 1-2 sentence summary of the project based on the site description.
 3. If there are crucial caveats about this project, add them as plain text immediately after the blockquote.
-4. Review the unflagged pages and group them logically using H2 headers (##). Invent section names that best fit the data (e.g. "## Core Concepts", "## API Reference", "## Tutorials", etc.). Do not create too many small sections; group them reasonably.
-5. CRITICAL: Take every single page marked "[SUPPLEMENTARY]" and place them together under a single "## Optional" header at the very end of the file.
+4. Group pages logically using H2 headers (##). Invent section names that best fit the data (e.g. "## Core Concepts", "## API Reference", "## Tutorials", etc.). Do not create too many small sections; group them reasonably.
+5. Place pages that an LLM consumer can safely skip — changelogs, legal/ToS, pricing, community, about pages — under a single "## Optional" header at the very end. The [SUPPLEMENTARY] flags are hints; you may promote a flagged page to a main section or demote an unflagged page to Optional if the full context warrants it.
 6. Under each H2, list the pages exactly as formatted: - [Title](url): Description
 7. Remove the "[SUPPLEMENTARY]" text from your final output.
 

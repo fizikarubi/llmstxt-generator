@@ -8,7 +8,7 @@ The app uses a **fan-out architecture** to avoid serverless function timeouts. I
 
 1. **Discover** — crawl the site via sitemap (preferred) or BFS fallback with 20 concurrent fetches (rate-limited to 20 req/s), max depth 2. Check robots.txt, filter, deduplicate, and normalize URLs. Over-provisions by 1.3× to account for pages lost to filtering.
 2. **Summarize** — chunk discovered URLs into batches of 10 and fan out concurrent requests (configurable, default 10) to a serverless function. Each batch fetches pages, extracts text, and summarizes them via Claude Haiku in a single LLM call. A 429 from any batch stops the queue and assembles with whatever pages succeeded.
-3. **Assemble** — aggregate all page summaries and send them to Claude in one streaming call. The LLM groups pages into logical H2 sections and places supplementary pages under `## Optional`. Haiku's 64k output token limit caps practical output at ~600 pages.
+3. **Assemble** — aggregate all page summaries and send them to Claude in one streaming call. The LLM groups pages into logical H2 sections and uses full-site context to decide which pages belong under `## Optional` (the `[SUPPLEMENTARY]` flags from the summarize phase are treated as hints, not hard rules). Haiku's 64k output token limit caps practical output at ~600 pages.
 
 ```
 User enters URL + API key
@@ -120,7 +120,7 @@ Fetches a batch of pages and generates LLM summaries in a single call.
 Takes all page summaries and produces the final llms.txt.
 
 - **Input:** `{ pages: PageSummary[], entryUrl, site: SiteInfo, apiKey }`
-- **Steps:** call Claude with flat page list (including [SUPPLEMENTARY] flags) via streaming → generates H1, blockquote, invents H2 sections from content, places all supplementary pages under ## Optional
+- **Steps:** call Claude with flat page list (including [SUPPLEMENTARY] hint flags) via streaming → generates H1, blockquote, invents H2 sections from content, uses full context to decide which pages go under ## Optional
 - **Returns:** `{ llmsTxt: string }`
 - **Timeout:** default (no explicit `maxDuration`)
 
@@ -183,7 +183,7 @@ The 1.3× over-provision (BFS only) accounts for pages filtered out later by rob
 Two functions, both using Claude Haiku 4.5 (`claude-haiku-4-5-20251001`) via the `@anthropic-ai/sdk`:
 
 - **`summarizePages`** — batched tagger: takes multiple pages (each with `PageInfo` + extracted text truncated to 6k chars) + `SiteInfo` in a single LLM call. Returns a `PageSummary[]` with title, summary, and isSupplementary per page. The system prompt uses `cache_control: ephemeral` so it's cached across calls.
-- **`assemblePageSumamaries`** — receives flat list of all pages (with [SUPPLEMENTARY] flag), invents H2 section names from content, groups logically, and places supplementary pages under ## Optional. Uses streaming (`client.messages.stream().finalMessage()`). Produces the complete llms.txt markdown.
+- **`assemblePageSumamaries`** — receives flat list of all pages (with [SUPPLEMENTARY] hint flags), invents H2 section names from content, groups logically, and uses full-site context to decide which pages belong under ## Optional (may promote flagged pages or demote unflagged ones). Uses streaming (`client.messages.stream().finalMessage()`). Produces the complete llms.txt markdown.
 
 **Token budget & page cap:** The assembly output budget is `pageCount × 100 + 1000` tokens, capped at the model's 64k max output. This means the practical ceiling is ~640 pages — beyond that, the output will be truncated. The UI warns users to stay under 600 pages for this reason.
 

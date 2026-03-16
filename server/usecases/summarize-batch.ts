@@ -42,13 +42,13 @@ export const summarizeBatchUseCase: UseCase<
                 throw new AppError('Page appears to be a JavaScript app shell', 422);
               }
 
-              const text = html.extractText(result.html);
+              const textContent = html.extractText(result.html);
               const pageInfo: PageInfo = {
                 pageUrl: result.url,
                 mdUrl,
                 description: html.extractDescription(result.html),
               };
-              return { pageInfo, textContent: text };
+              return { pageInfo, textContent };
             }),
           ),
         );
