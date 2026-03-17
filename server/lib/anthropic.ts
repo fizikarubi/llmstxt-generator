@@ -92,7 +92,7 @@ ${siteContext}
 For each page provided, produce a JSON object with EXACTLY these fields:
 - "title": A clean, descriptive title for this page (no site name prefixes).
 - "summary": A single, concise sentence describing the page's content for an LLM.
-- "isSupplementary": boolean (true ONLY if this is secondary/skippable info like changelogs, legal, about us, pricing, or community links. False for docs, guides, code, and tutorials).
+- "isSupplementary": boolean (true ONLY if this is secondary/skippable info like changelogs, legal, about us, pricing, community links, or deprecated/legacy API references. False for docs, guides, code, and tutorials).
 
 Your output MUST be a JSON array with one object per page, in the same order as the input pages.
 Respond with ONLY valid JSON, no markdown fences.
@@ -181,7 +181,7 @@ Generate a complete llms.txt file strictly following this spec:
 2. A blockquote starting with "> " containing a concise 1-2 sentence summary of the project based on the site description.
 3. If there are crucial caveats about this project, add them as plain text immediately after the blockquote.
 4. Group pages logically using H2 headers (##). Invent section names that best fit the data (e.g. "## Core Concepts", "## API Reference", "## Tutorials", etc.). Do not create too many small sections; group them reasonably.
-5. Place pages that an LLM consumer can safely skip — changelogs, legal/ToS, pricing, community, about pages — under a single "## Optional" header at the very end. The [SUPPLEMENTARY] flags are hints; you may promote a flagged page to a main section or demote an unflagged page to Optional if the full context warrants it.
+5. Place pages that an LLM consumer can safely skip — changelogs, legal/ToS, pricing, community, about pages, deprecated or legacy API references — under a single "## Optional" header at the very end. The [SUPPLEMENTARY] flags are hints; you may promote a flagged page to a main section or demote an unflagged page to Optional if the full context warrants it.
 6. Under each H2, list the pages exactly as formatted: - [Title](url): Description
 7. Remove the "[SUPPLEMENTARY]" text from your final output.
 

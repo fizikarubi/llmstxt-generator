@@ -117,7 +117,7 @@ const UrlInput = ({ onSubmit, disabled }: Props) => {
           </p>
 
           <label className="flex items-center justify-between text-sm text-zinc-300">
-            <span>Concurrency</span>
+            <span>Parallel requests</span>
             <span className="font-mono text-white">{concurrency}</span>
           </label>
           <input
